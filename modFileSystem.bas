@@ -1,0 +1,739 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modFileSystem"
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Resolves local, UNC, WebDAV, or HTTPS configuration paths.
+'-------------------------------------------------------------------------------
+Public Function ResolveConfiguredPath(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "ResolveConfiguredPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(strPath)
+
+    If Len(strResult) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "A configured path is blank.")
+
+    If LCase$(Left$(strResult, 8)) = "https://" Or LCase$(Left$(strResult, 7)) = "http://" Then
+        strResult = ConvertHttpUrlToWebDav(strResult)
+    Else
+        strResult = NormalizeBackslashes(strResult)
+    End If
+
+    Do While Len(strResult) > 3 And Right$(strResult, 1) = "\"
+        strResult = Left$(strResult, Len(strResult) - 1)
+    Loop
+
+ExitPoint:
+    If errNumber = 0 Then ResolveConfiguredPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strUrl As String
+' Returns:       String
+' Description:   Converts an HTTP or HTTPS SharePoint URL to a WebDAV UNC path.
+'-------------------------------------------------------------------------------
+Private Function ConvertHttpUrlToWebDav(ByVal strUrl As String) As String
+    Const METHOD_NAME As String = "ConvertHttpUrlToWebDav"
+    Dim blnUseSsl As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngFragmentPosition As Long
+    Dim lngPathPosition As Long
+    Dim lngQueryPosition As Long
+    Dim lngSchemePosition As Long
+    Dim strHost As String
+    Dim strHostAndPath As String
+    Dim strPathPart As String
+    Dim strResult As String
+    Dim strWorkingUrl As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strWorkingUrl = Trim$(strUrl)
+    blnUseSsl = LCase$(Left$(strWorkingUrl, 8)) = "https://"
+
+    lngQueryPosition = InStr(1, strWorkingUrl, "?", vbBinaryCompare)
+    If lngQueryPosition > 0 Then strWorkingUrl = Left$(strWorkingUrl, lngQueryPosition - 1)
+
+    lngFragmentPosition = InStr(1, strWorkingUrl, "#", vbBinaryCompare)
+    If lngFragmentPosition > 0 Then strWorkingUrl = Left$(strWorkingUrl, lngFragmentPosition - 1)
+
+    lngSchemePosition = InStr(1, strWorkingUrl, "://", vbBinaryCompare)
+    If lngSchemePosition = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Invalid SharePoint URL.")
+
+    strHostAndPath = Mid$(strWorkingUrl, lngSchemePosition + 3)
+    lngPathPosition = InStr(1, strHostAndPath, "/", vbBinaryCompare)
+
+    If lngPathPosition > 0 Then
+        strHost = Left$(strHostAndPath, lngPathPosition - 1)
+        strPathPart = Mid$(strHostAndPath, lngPathPosition + 1)
+    Else
+        strHost = strHostAndPath
+        strPathPart = vbNullString
+    End If
+
+    If Len(strHost) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "SharePoint URL does not contain a host name.")
+
+    strPathPart = DecodeCommonUrlEscapes(strPathPart)
+    strPathPart = NormalizeBackslashes(strPathPart)
+
+    If blnUseSsl Then
+        strResult = "\\" & strHost & "@SSL\DavWWWRoot"
+    Else
+        strResult = "\\" & strHost & "\DavWWWRoot"
+    End If
+
+    If Len(strPathPart) > 0 Then strResult = CombinePath(strResult, strPathPart)
+
+ExitPoint:
+    If errNumber = 0 Then ConvertHttpUrlToWebDav = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "url", strUrl)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strValue As String
+' Returns:       String
+' Description:   Decodes common URL characters used in SharePoint paths.
+'-------------------------------------------------------------------------------
+Private Function DecodeCommonUrlEscapes(ByVal strValue As String) As String
+    Const METHOD_NAME As String = "DecodeCommonUrlEscapes"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = strValue
+    strResult = Replace$(strResult, "%20", " ", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%23", "#", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%25", "%", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%26", "&", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%27", "'", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%28", "(", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%29", ")", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%2D", "-", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%5F", "_", 1, -1, vbTextCompare)
+
+ExitPoint:
+    If errNumber = 0 Then DecodeCommonUrlEscapes = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Normalizes slash direction while preserving a UNC prefix.
+'-------------------------------------------------------------------------------
+Private Function NormalizeBackslashes(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "NormalizeBackslashes"
+    Dim blnUncPath As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strRemainder As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Replace$(Trim$(strPath), "/", "\")
+    blnUncPath = Left$(strResult, 2) = "\\"
+
+    If blnUncPath Then
+        strRemainder = Mid$(strResult, 3)
+
+        Do While InStr(1, strRemainder, "\\", vbBinaryCompare) > 0
+            strRemainder = Replace$(strRemainder, "\\", "\")
+        Loop
+
+        strResult = "\\" & strRemainder
+    Else
+        Do While InStr(1, strResult, "\\", vbBinaryCompare) > 0
+            strResult = Replace$(strResult, "\\", "\")
+        Loop
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then NormalizeBackslashes = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strLeft As String; strRight As String
+' Returns:       String
+' Description:   Combines two file-system path components.
+'-------------------------------------------------------------------------------
+Public Function CombinePath(ByVal strLeft As String, ByVal strRight As String) As String
+    Const METHOD_NAME As String = "CombinePath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strLeftPart As String
+    Dim strResult As String
+    Dim strRightPart As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strLeftPart = NormalizeBackslashes(strLeft)
+    strRightPart = NormalizeBackslashes(strRight)
+
+    Do While Len(strLeftPart) > 3 And Right$(strLeftPart, 1) = "\"
+        strLeftPart = Left$(strLeftPart, Len(strLeftPart) - 1)
+    Loop
+
+    Do While Len(strRightPart) > 0 And Left$(strRightPart, 1) = "\"
+        strRightPart = Mid$(strRightPart, 2)
+    Loop
+
+    If Len(strRightPart) = 0 Then
+        strResult = strLeftPart
+    ElseIf Right$(strLeftPart, 1) = "\" Then
+        strResult = strLeftPart & strRightPart
+    Else
+        strResult = strLeftPart & "\" & strRightPart
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then CombinePath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "leftPath;rightPath", strLeft, strRight)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFolderPath As String
+' Returns:       ---
+' Description:   Creates a folder and any missing parent folders.
+'-------------------------------------------------------------------------------
+Public Sub EnsureFolderExists(ByVal strFolderPath As String)
+    Const METHOD_NAME As String = "EnsureFolderExists"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strParentPath As String
+    Dim strResolvedPath As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResolvedPath = ResolveConfiguredPath(strFolderPath)
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+
+    If objFileSystem.FolderExists(strResolvedPath) Then GoTo ExitPoint
+
+    strParentPath = objFileSystem.GetParentFolderName(strResolvedPath)
+
+    If Len(strParentPath) = 0 Or StrComp(strParentPath, strResolvedPath, vbTextCompare) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The folder cannot be created because its parent path is unavailable: " & strResolvedPath)
+    If Not objFileSystem.FolderExists(strParentPath) Then Call EnsureFolderExists(strParentPath)
+
+    Call objFileSystem.CreateFolder(strResolvedPath)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath", strFolderPath)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    dtRunTimestamp As Date
+' Returns:       String
+' Description:   Creates a unique temporary workspace for one macro run.
+'-------------------------------------------------------------------------------
+Public Function CreateRunWorkspace(ByVal dtRunTimestamp As Date) As String
+    Const METHOD_NAME As String = "CreateRunWorkspace"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngTimerToken As Long
+    Dim strBasePath As String
+    Dim strResult As String
+    Dim strRootPath As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strBasePath = Trim$(Environ$("TEMP"))
+    If Len(strBasePath) = 0 Then strBasePath = ThisWorkbook.Path
+    If Len(strBasePath) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "A temporary base folder could not be determined.")
+
+    strRootPath = CombinePath(strBasePath, "DallasCashTransactions")
+    Call EnsureFolderExists(strRootPath)
+
+    lngTimerToken = CLng(Timer * 1000) Mod 1000000
+    strResult = CombinePath(strRootPath, Format$(dtRunTimestamp, "yyyymmdd_hhnnss") & "_" & Format$(lngTimerToken, "000000"))
+    Call EnsureFolderExists(strResult)
+
+ExitPoint:
+    If errNumber = 0 Then CreateRunWorkspace = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strRootPath As String; dtReportDate As Date
+' Returns:       String
+' Description:   Builds the YYYY\MM\YYYY-MM-DD daily output path.
+'-------------------------------------------------------------------------------
+Public Function BuildDatedFolderPath(ByVal strRootPath As String, ByVal dtReportDate As Date) As String
+    Const METHOD_NAME As String = "BuildDatedFolderPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = CombinePath(strRootPath, Format$(dtReportDate, "yyyy"))
+    strResult = CombinePath(strResult, Format$(dtReportDate, "mm"))
+    strResult = CombinePath(strResult, Format$(dtReportDate, "yyyy-mm-dd"))
+
+ExitPoint:
+    If errNumber = 0 Then BuildDatedFolderPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "rootPath;reportDate", strRootPath, dtReportDate)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strSourcePath As String; strDestinationFolder As String
+' Returns:       ---
+' Description:   Copies one file to an existing or newly created folder.
+'-------------------------------------------------------------------------------
+Public Sub CopyFileToFolder(ByVal strSourcePath As String, ByVal strDestinationFolder As String)
+    Const METHOD_NAME As String = "CopyFileToFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strDestinationPath As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call EnsureFolderExists(strDestinationFolder)
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+
+    If Not objFileSystem.FileExists(strSourcePath) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Source file does not exist: " & strSourcePath)
+
+    strDestinationPath = CombinePath(strDestinationFolder, objFileSystem.GetFileName(strSourcePath))
+    Call objFileSystem.CopyFile(strSourcePath, strDestinationPath, True)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sourcePath;destinationFolder", strSourcePath, strDestinationFolder)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFilePath As String
+' Returns:       ---
+' Description:   Deletes a file when it exists.
+'-------------------------------------------------------------------------------
+Public Sub DeleteFileIfExists(ByVal strFilePath As String)
+    Const METHOD_NAME As String = "DeleteFileIfExists"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    If objFileSystem.FileExists(strFilePath) Then Call objFileSystem.DeleteFile(strFilePath, True)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "filePath", strFilePath)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFolderPath As String
+' Returns:       ---
+' Description:   Deletes a folder recursively when it exists.
+'-------------------------------------------------------------------------------
+Public Sub DeleteFolderIfExists(ByVal strFolderPath As String)
+    Const METHOD_NAME As String = "DeleteFolderIfExists"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    If objFileSystem.FolderExists(strFolderPath) Then Call objFileSystem.DeleteFolder(strFolderPath, True)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath", strFolderPath)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFilePath As String
+' Returns:       Boolean
+' Description:   Checks whether a file exists.
+'-------------------------------------------------------------------------------
+Public Function FileExists(ByVal strFilePath As String) As Boolean
+    Const METHOD_NAME As String = "FileExists"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    blnResult = objFileSystem.FileExists(strFilePath)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then FileExists = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "filePath", strFilePath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFolderPath As String; strFilePattern As String
+' Returns:       String
+' Description:   Returns the lexicographically latest matching file name.
+'-------------------------------------------------------------------------------
+Public Function GetLatestFile(ByVal strFolderPath As String, ByVal strFilePattern As String) As String
+    Const METHOD_NAME As String = "GetLatestFile"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strFileName As String
+    Dim strLatestFile As String
+    Dim strMaximumName As String
+    Dim strResolvedFolder As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResolvedFolder = ResolveConfiguredPath(strFolderPath)
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+
+    If Not objFileSystem.FolderExists(strResolvedFolder) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Configured folder does not exist: " & strResolvedFolder)
+
+    strFileName = Dir$(CombinePath(strResolvedFolder, strFilePattern))
+
+    Do While Len(strFileName) > 0
+        If UCase$(strFileName) > UCase$(strMaximumName) Then
+            strMaximumName = strFileName
+            strLatestFile = CombinePath(strResolvedFolder, strFileName)
+        End If
+
+        strFileName = Dir$()
+    Loop
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then GetLatestFile = strLatestFile
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath;filePattern", strFolderPath, strFilePattern)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Normalizes a workbook path for case-insensitive comparison.
+'-------------------------------------------------------------------------------
+Public Function NormalizeWorkbookPath(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "NormalizeWorkbookPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = ResolveConfiguredPath(strPath)
+    strResult = NormalizeBackslashes(strResult)
+
+    Do While Len(strResult) > 3 And Right$(strResult, 1) = "\"
+        strResult = Left$(strResult, Len(strResult) - 1)
+    Loop
+
+    strResult = LCase$(strResult)
+
+ExitPoint:
+    If errNumber = 0 Then NormalizeWorkbookPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFullPath As String
+' Returns:       String
+' Description:   Extracts a file name from a full path or URL.
+'-------------------------------------------------------------------------------
+Public Function GetFileNameFromPath(ByVal strFullPath As String) As String
+    Const METHOD_NAME As String = "GetFileNameFromPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngPosition As Long
+    Dim strResult As String
+    Dim strWorkingPath As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strWorkingPath = Replace$(strFullPath, "/", "\")
+    lngPosition = InStrRev(strWorkingPath, "\")
+
+    If lngPosition > 0 Then
+        strResult = Mid$(strWorkingPath, lngPosition + 1)
+    Else
+        strResult = strWorkingPath
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetFileNameFromPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "fullPath", strFullPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFullName As String; blnAllowNameFallback As Boolean
+' Returns:       Excel.Workbook
+' Description:   Finds an open workbook by normalized path and optional name fallback.
+'-------------------------------------------------------------------------------
+Public Function GetOpenWorkbookByFullName(ByVal strFullName As String, Optional ByVal blnAllowNameFallback As Boolean = True) As Excel.Workbook
+    Const METHOD_NAME As String = "GetOpenWorkbookByFullName"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strCandidateFullName As String
+    Dim strTargetFileName As String
+    Dim strTargetFullName As String
+    Dim wkbCandidate As Excel.Workbook
+    Dim wkbNameMatch As Excel.Workbook
+    Dim wkbResult As Excel.Workbook
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strTargetFullName = NormalizeWorkbookPath(strFullName)
+    strTargetFileName = GetFileNameFromPath(strFullName)
+
+    For Each wkbCandidate In Application.Workbooks
+        If StrComp(wkbCandidate.Name, strTargetFileName, vbTextCompare) = 0 Then
+            If wkbNameMatch Is Nothing Then Set wkbNameMatch = wkbCandidate
+
+            strCandidateFullName = NormalizeWorkbookPath(wkbCandidate.FullName)
+
+            If StrComp(strCandidateFullName, strTargetFullName, vbTextCompare) = 0 Then
+                Set wkbResult = wkbCandidate
+                Exit For
+            End If
+        End If
+    Next wkbCandidate
+
+    If wkbResult Is Nothing And blnAllowNameFallback Then Set wkbResult = wkbNameMatch
+
+ExitPoint:
+    Set wkbCandidate = Nothing
+    Set wkbNameMatch = Nothing
+    If errNumber = 0 Then Set GetOpenWorkbookByFullName = wkbResult
+    Set wkbResult = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "fullName;allowNameFallback", strFullName, blnAllowNameFallback)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strFileName As String
+' Returns:       String
+' Description:   Returns the lower-case extension including the leading dot.
+'-------------------------------------------------------------------------------
+Public Function GetFileExtension(ByVal strFileName As String) As String
+    Const METHOD_NAME As String = "GetFileExtension"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngPosition As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngPosition = InStrRev(strFileName, ".")
+    If lngPosition > 0 Then strResult = LCase$(Mid$(strFileName, lngPosition))
+
+ExitPoint:
+    If errNumber = 0 Then GetFileExtension = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "fileName", strFileName)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-26
+' Parameters:    strValue As String
+' Returns:       String
+' Description:   Removes characters that are invalid in Windows file names.
+'-------------------------------------------------------------------------------
+Public Function SanitizeFileNamePart(ByVal strValue As String) As String
+    Const METHOD_NAME As String = "SanitizeFileNamePart"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(strValue)
+    strResult = Replace$(strResult, "\", "_")
+    strResult = Replace$(strResult, "/", "_")
+    strResult = Replace$(strResult, ":", "_")
+    strResult = Replace$(strResult, "*", "_")
+    strResult = Replace$(strResult, "?", "_")
+    strResult = Replace$(strResult, Chr$(34), "_")
+    strResult = Replace$(strResult, "<", "_")
+    strResult = Replace$(strResult, ">", "_")
+    strResult = Replace$(strResult, "|", "_")
+
+    Do While Len(strResult) > 0 And (Right$(strResult, 1) = "." Or Right$(strResult, 1) = " ")
+        strResult = Left$(strResult, Len(strResult) - 1)
+    Loop
+
+    If Len(strResult) = 0 Then strResult = "UNNAMED"
+
+ExitPoint:
+    If errNumber = 0 Then SanitizeFileNamePart = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function

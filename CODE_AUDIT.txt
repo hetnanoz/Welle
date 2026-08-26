@@ -1,0 +1,40 @@
+DALLAS CASH TRANSACTIONS - STATIC CODE AUDIT
+============================================
+
+Audit date: 2026-08-26
+
+Scope
+-----
+- Static inspection of the generated VBA source files.
+- Excel/VBE compilation and live Outlook/SharePoint execution are not available in this environment.
+
+Results
+-------
+- Standard modules: 13
+- VBA procedures: 64
+- Procedures with Const METHOD_NAME: 64
+- Procedures with If Not DEV_MODE Then On Error GoTo ErrHandler: 64
+- Procedures with ExitPoint: 64
+- Procedures with ErrHandler: 64
+- Procedures calling ErrorManager.addError: 64
+- ErrorManager.display calls: 1, in the MASTER only
+- SLAVE re-raise paths: 63
+- Option Explicit: present in every module
+- Attribute metadata lines: 0
+- On Error Resume Next: 0
+- On Error GoTo 0: 0
+- .Select: 0
+- .Activate: 0
+- Selection: 0
+- ActiveCell: 0
+- VBA line-continuation statements: 0
+- Local ErrorManager class/instance: 0
+- Error_Log worksheet logic: 0
+
+Important final verification
+----------------------------
+After importing/pasting the modules into the target workbook, run:
+
+    Debug -> Compile VBAProject
+
+Then execute the functional tests from README_SETUP_PL.txt in the target corporate environment.

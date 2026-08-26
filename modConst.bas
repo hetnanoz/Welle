@@ -1,0 +1,43 @@
+Option Explicit
+
+Public Const SHEET_MAPPING As String = "Mapping"
+Public Const SHEET_STATIC_DATA As String = "Static_Data"
+Public Const SHEET_TRANSACTIONS As String = "Transactions"
+
+Public Const NAME_FLAG_SAVE_LOCAL As String = "FLAG_SAVE_LOCAL"
+Public Const NAME_FLAG_SAVE_SHAREPOINT As String = "FLAG_SAVE_SHAREPOINT"
+Public Const NAME_FLAG_UPDATE_HISTORICAL As String = "FLAG_UPDATE_HISTORICAL"
+Public Const NAME_OUTLOOK_MAILBOX As String = "OUTLOOK_MAILBOX"
+Public Const NAME_OUTLOOK_SOURCE_FOLDER As String = "OUTLOOK_SOURCE_FOLDER"
+Public Const NAME_OUTLOOK_ARCHIVE_FOLDER As String = "OUTLOOK_ARCHIVE_FOLDER"
+Public Const NAME_FONDSLISTE_FOLDER As String = "FONDSLISTE_FOLDER"
+Public Const NAME_FONDSLISTE_PATTERN As String = "FONDSLISTE_PATTERN"
+Public Const NAME_FONDSLISTE_EXTENSION As String = "FONDSLISTE_EXTENSION"
+Public Const NAME_OUTPUT_LOCAL_BASE As String = "OUTPUT_LOCAL_BASE"
+Public Const NAME_OUTPUT_SHAREPOINT_BASE As String = "OUTPUT_SHAREPOINT_BASE"
+Public Const NAME_SUPPORTED_TEAMS As String = "SUPPORTED_TEAMS"
+
+Public Const OUTLOOK_SUBJECT_PHRASE As String = "Cash transactions Fonds Welle"
+
+Public Const INPUT_COLUMN_COUNT As Long = 16
+Public Const OUTPUT_COLUMN_COUNT As Long = 21
+Public Const INPUT_HEADER_ROW As Long = 1
+Public Const INPUT_FIRST_DATA_ROW As Long = 2
+Public Const STATIC_DATA_FIRST_DATA_ROW As Long = 2
+Public Const FONDSLISTE_FIRST_DATA_ROW As Long = 10
+Public Const INITIAL_INPUT_CAPACITY As Long = 1024
+Public Const AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
+
+Public Const REPORT_COMBINED_PREFIX As String = "Dallas_Transactions_All_Teams_Combined_"
+Public Const REPORT_TEAM_PREFIX As String = "Dallas_Transactions_Team_"
+Public Const HISTORICAL_COMBINED_FILE As String = "Master_Historical_Combined.xlsx"
+Public Const HISTORICAL_TEAM_PREFIX As String = "Master_Historical_Team_"
+
+Public Const ERROR_CONFIGURATION As Long = 1101
+Public Const ERROR_OUTLOOK As Long = 1201
+Public Const ERROR_INPUT_DATA As Long = 1301
+Public Const ERROR_FONDSLISTE As Long = 1401
+Public Const ERROR_STATIC_DATA As Long = 1501
+Public Const ERROR_OUTPUT As Long = 1601
+Public Const ERROR_HISTORICAL As Long = 1701
+Public Const ERROR_FILE_SYSTEM As Long = 1801
