@@ -4,7 +4,7 @@ Private Const CLASS_NAME As String = "modConfig"
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    appConfig As TAppConfig
 ' Returns:       ---
 ' Description:   Reads and validates all named configuration cells.
@@ -22,6 +22,9 @@ Public Sub LoadConfiguration(ByRef appConfig As TAppConfig)
     appConfig.OutlookMailbox = ReadRequiredText(NAME_OUTLOOK_MAILBOX)
     appConfig.OutlookSourceFolder = ReadRequiredText(NAME_OUTLOOK_SOURCE_FOLDER)
     appConfig.OutlookArchiveFolder = ReadRequiredText(NAME_OUTLOOK_ARCHIVE_FOLDER)
+    appConfig.OutlookSubjectPrefix = ReadRequiredText(NAME_OUTLOOK_SUBJECT_PREFIX)
+    appConfig.OutlookAttachmentPrefix = ReadRequiredText(NAME_OUTLOOK_ATTACHMENT_PREFIX)
+    appConfig.InputWorksheetName = ReadRequiredText(NAME_INPUT_WORKSHEET_NAME)
     appConfig.FondslisteFolder = ReadRequiredText(NAME_FONDSLISTE_FOLDER)
     appConfig.FondslistePattern = ReadRequiredText(NAME_FONDSLISTE_PATTERN)
     appConfig.FondslisteExtension = ReadRequiredText(NAME_FONDSLISTE_EXTENSION)
@@ -238,6 +241,11 @@ Private Sub ValidateConfiguration(ByRef appConfig As TAppConfig)
     If Not appConfig.SaveLocal And Not appConfig.SaveSharePoint Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "At least one output flag must be TRUE.")
     If appConfig.SaveLocal And Len(Trim$(appConfig.OutputLocalBase)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "Local output path is required when FLAG_SAVE_LOCAL is TRUE.")
     If appConfig.SaveSharePoint And Len(Trim$(appConfig.OutputSharePointBase)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "SharePoint output path is required when FLAG_SAVE_SHAREPOINT is TRUE.")
+    If Len(Trim$(appConfig.OutlookSubjectPrefix)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must not be blank.")
+    If InStr(1, appConfig.OutlookSubjectPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must not contain '*'. Enter only the beginning of the subject.")
+    If Len(Trim$(appConfig.OutlookAttachmentPrefix)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must not be blank.")
+    If InStr(1, appConfig.OutlookAttachmentPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must not contain '*'. Enter only the beginning of the attachment filename.")
+    If Len(Trim$(appConfig.InputWorksheetName)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "INPUT_WORKSHEET_NAME must not be blank.")
     If StrComp(appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, vbTextCompare) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "Outlook source and archive folders must be different.")
 
 ExitPoint:
