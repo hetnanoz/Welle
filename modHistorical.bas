@@ -168,6 +168,11 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
         wksHistory.Range(wksHistory.Cells(lngExistingLastRow + 1, 1), wksHistory.Cells(lngExistingLastRow + lngNewCount, OUTPUT_COLUMN_COUNT)).Value2 = arrNewRows
     End If
 
+    If blnNewWorkbook Or lngNewCount > 0 Or blnHeaderUpgraded Then
+        lngExistingLastRow = lngExistingLastRow + lngNewCount
+        Call wksHistory.Range(wksHistory.Cells(1, 1), wksHistory.Cells(lngExistingLastRow, OUTPUT_COLUMN_COUNT)).Columns.AutoFit
+    End If
+
     If blnNewWorkbook Then
         Call ApplyWorkbookSensitivityLabel(wkbHistory)
         Call wkbHistory.SaveAs(Filename:=strHistoricalPath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False, AddToMru:=False, Local:=True)
