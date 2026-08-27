@@ -28,6 +28,7 @@ Public Sub RunDallasCashTransactions()
     Dim errNumber As Long
     Dim lngPreviousAutomationSecurity As Long
     Dim strLatestFondslistePath As String
+    Dim strSuccessMessage As String
     Dim strWorkspace As String
     Dim varPreviousStatusBar As Variant
     Dim xlPreviousCalculation As XlCalculation
@@ -86,6 +87,8 @@ Public Sub RunDallasCashTransactions()
     Application.StatusBar = "Dallas Cash Transactions: archiving processed Outlook messages..."
     Call ArchiveProcessedOutlookMessages(appConfig, dictProcessedMailSubjects)
 
+    strSuccessMessage = BuildSuccessMessage(arrCombined, colTeams, colAttachmentPaths.Count, dictProcessedMailSubjects.Count)
+
 ExitPoint:
     Set dictAccounts = Nothing
     Set dictAttachmentSubjects = Nothing
@@ -108,7 +111,12 @@ ExitPoint:
         Application.ScreenUpdating = blnPreviousScreenUpdating
     End If
 
-    If errNumber <> 0 Then Call ErrorManager.display
+    If errNumber <> 0 Then
+        Call ErrorManager.display
+    ElseIf Len(strSuccessMessage) > 0 Then
+        Call MsgBox(strSuccessMessage, vbInformation, "Dallas Cash Transactions")
+    End If
+
     Exit Sub
 
 ErrHandler:
@@ -117,3 +125,106 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "workspace;fondslistePath", strWorkspace, strLatestFondslistePath)
     GoTo ExitPoint
 End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrCombined As Variant; colTeams As Collection; lngAttachmentCount As Long; lngMailCount As Long
+' Returns:       String
+' Description:   Builds the final success message with transaction counts per team.
+'-------------------------------------------------------------------------------
+Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal lngAttachmentCount As Long, ByVal lngMailCount As Long) As String
+    Const METHOD_NAME As String = "BuildSuccessMessage"
+    Dim arrKeys As Variant
+    Dim dictConfigured As Object
+    Dim dictTeamCounts As Object
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngCount As Long
+    Dim lngKey As Long
+    Dim lngOtherCount As Long
+    Dim lngRow As Long
+    Dim lngTeam As Long
+    Dim lngTransactionCount As Long
+    Dim strOtherTeams As String
+    Dim strResult As String
+    Dim strTeam As String
+    Dim strTeamsWithTrades As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictConfigured = CreateObject("Scripting.Dictionary")
+    dictConfigured.CompareMode = vbTextCompare
+    Set dictTeamCounts = CreateObject("Scripting.Dictionary")
+    dictTeamCounts.CompareMode = vbTextCompare
+
+    lngTransactionCount = UBound(arrCombined, 1) - 1
+
+    For lngRow = 2 To UBound(arrCombined, 1)
+        strTeam = Trim$(CStr(arrCombined(lngRow, 5)))
+        If Len(strTeam) = 0 Then strTeam = "UNKNOWN TEAM"
+
+        If dictTeamCounts.Exists(strTeam) Then
+            dictTeamCounts(strTeam) = CLng(dictTeamCounts(strTeam)) + 1
+        Else
+            dictTeamCounts.Add strTeam, 1
+        End If
+    Next lngRow
+
+    For lngTeam = 1 To colTeams.Count
+        strTeam = Trim$(CStr(colTeams(lngTeam)))
+        If Len(strTeam) > 0 Then dictConfigured(strTeam) = True
+
+        If dictTeamCounts.Exists(strTeam) Then
+            lngCount = CLng(dictTeamCounts(strTeam))
+
+            If Len(strTeamsWithTrades) > 0 Then strTeamsWithTrades = strTeamsWithTrades & ", "
+            strTeamsWithTrades = strTeamsWithTrades & strTeam & " (" & CStr(lngCount) & ")"
+        End If
+    Next lngTeam
+
+    If dictTeamCounts.Count > 0 Then
+        arrKeys = dictTeamCounts.Keys
+
+        For lngKey = LBound(arrKeys) To UBound(arrKeys)
+            strTeam = CStr(arrKeys(lngKey))
+
+            If Not dictConfigured.Exists(strTeam) Then
+                lngCount = CLng(dictTeamCounts(strTeam))
+                lngOtherCount = lngOtherCount + lngCount
+
+                If Len(strOtherTeams) > 0 Then strOtherTeams = strOtherTeams & ", "
+                strOtherTeams = strOtherTeams & strTeam & " (" & CStr(lngCount) & ")"
+            End If
+        Next lngKey
+    End If
+
+    If Len(strTeamsWithTrades) = 0 Then strTeamsWithTrades = "none"
+
+    strResult = "Dallas Cash Transactions completed successfully."
+    strResult = strResult & vbCrLf & vbCrLf
+    strResult = strResult & "Unique transactions: " & CStr(lngTransactionCount) & vbCrLf
+    strResult = strResult & "Excel attachments processed: " & CStr(lngAttachmentCount) & vbCrLf
+    strResult = strResult & "Outlook messages archived: " & CStr(lngMailCount) & vbCrLf
+    strResult = strResult & "Teams with trades: " & strTeamsWithTrades
+
+    If lngOtherCount > 0 Then
+        strResult = strResult & vbCrLf
+        strResult = strResult & "Other / unconfigured Team values: " & strOtherTeams
+    End If
+
+ExitPoint:
+    Set dictTeamCounts = Nothing
+    Set dictConfigured = Nothing
+
+    If errNumber = 0 Then BuildSuccessMessage = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;team", lngRow, strTeam)
+    GoTo ExitPoint
+End Function
+
