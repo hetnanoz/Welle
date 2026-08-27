@@ -4,12 +4,12 @@ Private Const CLASS_NAME As String = "modInput"
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
-' Parameters:    colAttachmentPaths As Collection
+' Creation date: 2026-08-27
+' Parameters:    colAttachmentPaths As Collection; strWorksheetName As String
 ' Returns:       Variant
-' Description:   Merges all A:P input files into one in-memory A:U array.
+' Description:   Merges data from the configured worksheet in all A:P input files.
 '-------------------------------------------------------------------------------
-Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection) As Variant
+Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal strWorksheetName As String) As Variant
     Const METHOD_NAME As String = "MergeInputFiles"
     Dim arrCombined As Variant
     Dim arrFileData As Variant
@@ -39,7 +39,7 @@ Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection) As Varia
 
     For lngFile = 1 To lngAttachmentCount
         strFilePath = CStr(colAttachmentPaths(lngFile))
-        Call ReadInputFileData(strFilePath, arrFileData, lngFileRows)
+        Call ReadInputFileData(strFilePath, strWorksheetName, arrFileData, lngFileRows)
 
         If lngFileRows > 0 Then
             lngRequiredCapacity = lngRecordCount + lngFileRows
@@ -74,18 +74,18 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "attachmentCount;currentFile", lngAttachmentCount, strFilePath)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "attachmentCount;currentFile;worksheetName", lngAttachmentCount, strFilePath, strWorksheetName)
     GoTo ExitPoint
 End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
-' Parameters:    strFilePath As String; arrData As Variant; lngDataRows As Long
+' Creation date: 2026-08-27
+' Parameters:    strFilePath As String; strWorksheetName As String; arrData As Variant; lngDataRows As Long
 ' Returns:       ---
-' Description:   Reads one validated input workbook into a Variant array.
+' Description:   Reads the configured worksheet from one validated input workbook.
 '-------------------------------------------------------------------------------
-Private Sub ReadInputFileData(ByVal strFilePath As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
+Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetName As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
     Const METHOD_NAME As String = "ReadInputFileData"
     Dim blnCloseRequired As Boolean
     Dim errDescription As String
@@ -94,6 +94,7 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByRef arrData As Vari
     Dim handlerErrNumber As Long
     Dim lngLastRow As Long
     Dim wkbInput As Excel.Workbook
+    Dim wksCandidate As Excel.Worksheet
     Dim wksInput As Excel.Worksheet
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -106,7 +107,14 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByRef arrData As Vari
 
     If wkbInput.Worksheets.Count = 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook does not contain a worksheet.")
 
-    Set wksInput = wkbInput.Worksheets(1)
+    For Each wksCandidate In wkbInput.Worksheets
+        If StrComp(CStr(wksCandidate.Name), strWorksheetName, vbTextCompare) = 0 Then
+            Set wksInput = wksCandidate
+            Exit For
+        End If
+    Next wksCandidate
+
+    If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Worksheet '" & strWorksheetName & "' was not found in input file '" & strFilePath & "'.")
     Call ValidateInputHeader(wksInput, strFilePath)
 
     lngLastRow = GetInputLastRow(wksInput)
@@ -117,6 +125,7 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByRef arrData As Vari
     End If
 
 ExitPoint:
+    Set wksCandidate = Nothing
     Set wksInput = Nothing
 
     If blnCloseRequired Then
@@ -131,7 +140,7 @@ ExitPoint:
 ErrHandler:
     handlerErrNumber = VBA.Err.Number
     handlerErrDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, handlerErrNumber, handlerErrDescription, "filePath", strFilePath)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, handlerErrNumber, handlerErrDescription, "filePath;worksheetName", strFilePath, strWorksheetName)
 
     If errNumber = 0 Then
         errNumber = handlerErrNumber
