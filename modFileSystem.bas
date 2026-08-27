@@ -737,3 +737,89 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig; dtRunTimestamp As Date; strFallbackWorkspace As String
+' Returns:       String
+' Description:   Creates the working Input folder, preferring the enabled local daily output folder.
+'-------------------------------------------------------------------------------
+Public Function CreateInputWorkingFolder(ByRef appConfig As TAppConfig, ByVal dtRunTimestamp As Date, ByVal strFallbackWorkspace As String) As String
+    Const METHOD_NAME As String = "CreateInputWorkingFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strDailyFolder As String
+    Dim strResolvedLocalRoot As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If appConfig.SaveLocal Then
+        strResolvedLocalRoot = ResolveConfiguredPath(appConfig.OutputLocalBase)
+        strDailyFolder = BuildDatedFolderPath(strResolvedLocalRoot, DateValue(dtRunTimestamp))
+        strResult = CombinePath(strDailyFolder, "Input")
+    Else
+        strResult = CombinePath(strFallbackWorkspace, "Input")
+    End If
+
+    Call EnsureFolderExists(strResult)
+
+ExitPoint:
+    If errNumber = 0 Then CreateInputWorkingFolder = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "saveLocal;localBase;fallbackWorkspace", appConfig.SaveLocal, appConfig.OutputLocalBase, strFallbackWorkspace)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    colAttachmentPaths As Collection; colDestinationRoots As Collection; dtReportDate As Date; strSourceInputFolder As String
+' Returns:       ---
+' Description:   Publishes downloaded source files to an Input subfolder in every enabled daily output location.
+'-------------------------------------------------------------------------------
+Public Sub PublishInputFilesToDailyFolders(ByVal colAttachmentPaths As Collection, ByVal colDestinationRoots As Collection, ByVal dtReportDate As Date, ByVal strSourceInputFolder As String)
+    Const METHOD_NAME As String = "PublishInputFilesToDailyFolders"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngFile As Long
+    Dim lngRoot As Long
+    Dim strDestinationInputFolder As String
+    Dim strSourceFile As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If colAttachmentPaths Is Nothing Then GoTo ExitPoint
+    If colDestinationRoots Is Nothing Then GoTo ExitPoint
+
+    For lngRoot = 1 To colDestinationRoots.Count
+        strDestinationInputFolder = BuildDatedFolderPath(CStr(colDestinationRoots(lngRoot)), dtReportDate)
+        strDestinationInputFolder = CombinePath(strDestinationInputFolder, "Input")
+
+        If StrComp(NormalizeWorkbookPath(strDestinationInputFolder), NormalizeWorkbookPath(strSourceInputFolder), vbTextCompare) <> 0 Then
+            Call EnsureFolderExists(strDestinationInputFolder)
+
+            For lngFile = 1 To colAttachmentPaths.Count
+                strSourceFile = CStr(colAttachmentPaths(lngFile))
+                Call CopyFileToFolder(strSourceFile, strDestinationInputFolder)
+            Next lngFile
+        End If
+    Next lngRoot
+
+ExitPoint:
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sourceInputFolder;destinationInputFolder;sourceFile", strSourceInputFolder, strDestinationInputFolder, strSourceFile)
+    GoTo ExitPoint
+End Sub
+
