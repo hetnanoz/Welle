@@ -5,11 +5,11 @@ Private Const CLASS_NAME As String = "modInput"
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    colAttachmentPaths As Collection; strWorksheetName As String
+' Parameters:    colAttachmentPaths As Collection; strWorksheetName As String; dictAttachmentSubjects As Object
 ' Returns:       Variant
-' Description:   Merges data from the configured worksheet in all A:P input files.
+' Description:   Merges A:P input files and preserves the Outlook subject for source-aware validation errors.
 '-------------------------------------------------------------------------------
-Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal strWorksheetName As String) As Variant
+Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal strWorksheetName As String, ByVal dictAttachmentSubjects As Object) As Variant
     Const METHOD_NAME As String = "MergeInputFiles"
     Dim arrCombined As Variant
     Dim arrFileData As Variant
@@ -26,6 +26,7 @@ Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal st
     Dim lngRequiredCapacity As Long
     Dim lngRow As Long
     Dim strFilePath As String
+    Dim strMailSubject As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
@@ -39,7 +40,13 @@ Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal st
 
     For lngFile = 1 To lngAttachmentCount
         strFilePath = CStr(colAttachmentPaths(lngFile))
-        Call ReadInputFileData(strFilePath, strWorksheetName, arrFileData, lngFileRows)
+        strMailSubject = vbNullString
+
+        If Not dictAttachmentSubjects Is Nothing Then
+            If dictAttachmentSubjects.Exists(strFilePath) Then strMailSubject = CStr(dictAttachmentSubjects(strFilePath))
+        End If
+
+        Call ReadInputFileData(strFilePath, strWorksheetName, strMailSubject, arrFileData, lngFileRows)
 
         If lngFileRows > 0 Then
             lngRequiredCapacity = lngRecordCount + lngFileRows
@@ -74,18 +81,18 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "attachmentCount;currentFile;worksheetName", lngAttachmentCount, strFilePath, strWorksheetName)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "attachmentCount;currentFile;worksheetName;mailSubject", lngAttachmentCount, strFilePath, strWorksheetName, strMailSubject)
     GoTo ExitPoint
 End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    strFilePath As String; strWorksheetName As String; arrData As Variant; lngDataRows As Long
+' Parameters:    strFilePath As String; strWorksheetName As String; strMailSubject As String; arrData As Variant; lngDataRows As Long
 ' Returns:       ---
-' Description:   Reads the configured worksheet from one validated input workbook.
+' Description:   Reads one input workbook and includes the source Outlook subject in validation failures.
 '-------------------------------------------------------------------------------
-Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetName As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
+Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetName As String, ByVal strMailSubject As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
     Const METHOD_NAME As String = "ReadInputFileData"
     Dim blnCloseRequired As Boolean
     Dim errDescription As String
@@ -105,7 +112,7 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     Set wkbInput = Application.Workbooks.Open(Filename:=strFilePath, UpdateLinks:=0, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
     blnCloseRequired = True
 
-    If wkbInput.Worksheets.Count = 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook does not contain a worksheet.")
+    If wkbInput.Worksheets.Count = 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook does not contain a worksheet. Outlook mail subject: '" & strMailSubject & "'.")
 
     For Each wksCandidate In wkbInput.Worksheets
         If StrComp(CStr(wksCandidate.Name), strWorksheetName, vbTextCompare) = 0 Then
@@ -114,8 +121,8 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
         End If
     Next wksCandidate
 
-    If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Worksheet '" & strWorksheetName & "' was not found in input file '" & strFilePath & "'.")
-    Call ValidateInputHeader(wksInput, strFilePath)
+    If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Worksheet '" & strWorksheetName & "' was not found in input file '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
+    Call ValidateInputHeader(wksInput, strFilePath, strMailSubject)
 
     lngLastRow = GetInputLastRow(wksInput)
 
@@ -140,7 +147,7 @@ ExitPoint:
 ErrHandler:
     handlerErrNumber = VBA.Err.Number
     handlerErrDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, handlerErrNumber, handlerErrDescription, "filePath;worksheetName", strFilePath, strWorksheetName)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, handlerErrNumber, handlerErrDescription, "filePath;worksheetName;mailSubject", strFilePath, strWorksheetName, strMailSubject)
 
     If errNumber = 0 Then
         errNumber = handlerErrNumber
@@ -153,11 +160,11 @@ End Sub
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-26
-' Parameters:    wksInput As Excel.Worksheet; strFilePath As String
+' Parameters:    wksInput As Excel.Worksheet; strFilePath As String; strMailSubject As String
 ' Returns:       ---
-' Description:   Validates the required sixteen-column input header.
+' Description:   Validates the required sixteen-column header and identifies the source Outlook mail on failure.
 '-------------------------------------------------------------------------------
-Private Sub ValidateInputHeader(ByVal wksInput As Excel.Worksheet, ByVal strFilePath As String)
+Private Sub ValidateInputHeader(ByVal wksInput As Excel.Worksheet, ByVal strFilePath As String, ByVal strMailSubject As String)
     Const METHOD_NAME As String = "ValidateInputHeader"
     Dim arrHeaders As Variant
     Dim errDescription As String
@@ -174,7 +181,7 @@ Private Sub ValidateInputHeader(ByVal wksInput As Excel.Worksheet, ByVal strFile
         strActual = Trim$(CStr(wksInput.Cells(INPUT_HEADER_ROW, lngColumn).Value2))
         strExpected = CStr(arrHeaders(lngColumn - 1))
 
-        If StrComp(strActual, strExpected, vbTextCompare) <> 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unexpected header in column " & CStr(lngColumn) & ". Expected '" & strExpected & "' and found '" & strActual & "'.")
+        If StrComp(strActual, strExpected, vbTextCompare) <> 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unexpected header in column " & CStr(lngColumn) & ". Outlook mail subject: '" & strMailSubject & "'. Expected '" & strExpected & "' and found '" & strActual & "'.")
     Next lngColumn
 
 ExitPoint:
@@ -184,7 +191,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "filePath;column", strFilePath, lngColumn)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "filePath;column;mailSubject", strFilePath, lngColumn, strMailSubject)
     GoTo ExitPoint
 End Sub
 
@@ -274,7 +281,7 @@ Private Function GetInputHeaders() As Variant
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    arrResult = Array("Account", "Account Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal")
+    arrResult = Array("Account", "Accout Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal")
 
 ExitPoint:
     If errNumber = 0 Then GetInputHeaders = arrResult
