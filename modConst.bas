@@ -24,7 +24,9 @@ Public Const NAME_SUPPORTED_TEAMS As String = "SUPPORTED_TEAMS"
 
 
 Public Const INPUT_COLUMN_COUNT As Long = 16
-Public Const OUTPUT_COLUMN_COUNT As Long = 21
+Public Const OUTPUT_COLUMN_COUNT As Long = 22
+Public Const OUTPUT_TIMESTAMP_COLUMN As Long = 22
+Public Const OUTPUT_TIMESTAMP_NUMBER_FORMAT As String = "ddmmyyyyhhmm"
 Public Const INPUT_HEADER_ROW As Long = 1
 Public Const INPUT_FIRST_DATA_ROW As Long = 2
 Public Const STATIC_DATA_FIRST_DATA_ROW As Long = 2
