@@ -23,22 +23,26 @@ Public Sub UpdateHistoricalFiles(ByRef arrCombined As Variant, ByVal colTeams As
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    For lngRoot = 1 To colDestinationRoots.Count
-        strRootPath = CStr(colDestinationRoots(lngRoot))
-        strHistoricalPath = CombinePath(strRootPath, HISTORICAL_COMBINED_FILE)
-        Call UpdateHistoricalWorkbook(strHistoricalPath, arrCombined)
-    Next lngRoot
+    If UBound(arrCombined, 1) > 1 Then
+        For lngRoot = 1 To colDestinationRoots.Count
+            strRootPath = CStr(colDestinationRoots(lngRoot))
+            strHistoricalPath = CombinePath(strRootPath, HISTORICAL_COMBINED_FILE)
+            Call UpdateHistoricalWorkbook(strHistoricalPath, arrCombined)
+        Next lngRoot
+    End If
 
     For lngTeam = 1 To colTeams.Count
         strTeam = CStr(colTeams(lngTeam))
         strTeamFilePart = SanitizeFileNamePart(strTeam)
         arrTeamData = FilterTransactionsByTeam(arrCombined, strTeam)
 
-        For lngRoot = 1 To colDestinationRoots.Count
-            strRootPath = CStr(colDestinationRoots(lngRoot))
-            strHistoricalPath = CombinePath(strRootPath, HISTORICAL_TEAM_PREFIX & strTeamFilePart & ".xlsx")
-            Call UpdateHistoricalWorkbook(strHistoricalPath, arrTeamData)
-        Next lngRoot
+        If UBound(arrTeamData, 1) > 1 Then
+            For lngRoot = 1 To colDestinationRoots.Count
+                strRootPath = CStr(colDestinationRoots(lngRoot))
+                strHistoricalPath = CombinePath(strRootPath, HISTORICAL_TEAM_PREFIX & strTeamFilePart & ".xlsx")
+                Call UpdateHistoricalWorkbook(strHistoricalPath, arrTeamData)
+            Next lngRoot
+        End If
 
         arrTeamData = Empty
     Next lngTeam
@@ -112,6 +116,9 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     Else
         Call ValidateHistoricalHeader(wksHistory, strHistoricalPath)
     End If
+
+    wksHistory.Columns("C:D").NumberFormat = "dd.mm.yyyy"
+    wksHistory.Columns("H:I").NumberFormat = "dd.mm.yyyy"
 
     lngExistingLastRow = wksHistory.Cells(wksHistory.Rows.Count, 6).End(xlUp).Row
     If lngExistingLastRow < 1 Then lngExistingLastRow = 1
@@ -265,6 +272,7 @@ Private Sub InitializeHistoricalHeader(ByVal wksHistory As Excel.Worksheet)
     wksHistory.Rows(1).Font.Bold = True
     Call wksHistory.Range(wksHistory.Cells(1, 1), wksHistory.Cells(1, OUTPUT_COLUMN_COUNT)).AutoFilter
     wksHistory.Columns("C:D").NumberFormat = "dd.mm.yyyy"
+    wksHistory.Columns("H:I").NumberFormat = "dd.mm.yyyy"
     wksHistory.Columns("R:S").NumberFormat = "#,##0.00"
 
 ExitPoint:
