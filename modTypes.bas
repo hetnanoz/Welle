@@ -7,6 +7,9 @@ Public Type TAppConfig
     OutlookMailbox As String
     OutlookSourceFolder As String
     OutlookArchiveFolder As String
+    OutlookSubjectPrefix As String
+    OutlookAttachmentPrefix As String
+    InputWorksheetName As String
     FondslisteFolder As String
     FondslistePattern As String
     FondslisteExtension As String
