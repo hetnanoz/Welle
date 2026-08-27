@@ -133,11 +133,12 @@ End Sub
 ' Creation date: 2026-08-26
 ' Parameters:    arrCombined As Variant; colTeams As Collection; colDestinationRoots As Collection; dtRunTimestamp As Date; strWorkspace As String
 ' Returns:       ---
-' Description:   Creates and publishes the combined and per-team daily reports.
+' Description:   Creates combined, unknown-fund, and per-team daily reports.
 '-------------------------------------------------------------------------------
 Public Sub CreateDailyReports(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal colDestinationRoots As Collection, ByVal dtRunTimestamp As Date, ByVal strWorkspace As String)
     Const METHOD_NAME As String = "CreateDailyReports"
     Dim arrTeamData As Variant
+    Dim arrUnknownData As Variant
     Dim blnEmpty As Boolean
     Dim errDescription As String
     Dim errNumber As Long
@@ -155,6 +156,15 @@ Public Sub CreateDailyReports(ByRef arrCombined As Variant, ByVal colTeams As Co
 
     strFileName = REPORT_COMBINED_PREFIX & strDateToken & "_" & strTimeToken & ".xlsx"
     Call PublishReport(arrCombined, strFileName, colDestinationRoots, DateValue(dtRunTimestamp), strWorkspace)
+
+    arrUnknownData = FilterUnknownFundTransactions(arrCombined)
+
+    If UBound(arrUnknownData, 1) > 1 Then
+        strFileName = REPORT_UNKNOWN_PREFIX & strDateToken & "_" & strTimeToken & ".xlsx"
+        Call PublishReport(arrUnknownData, strFileName, colDestinationRoots, DateValue(dtRunTimestamp), strWorkspace)
+    End If
+
+    arrUnknownData = Empty
 
     For lngTeam = 1 To colTeams.Count
         strTeam = CStr(colTeams(lngTeam))
