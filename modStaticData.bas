@@ -279,13 +279,14 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    varValue As Variant
 ' Returns:       String
-' Description:   Converts an input date to DD.MM.YYYY text.
+' Description:   Converts Excel serial dates, ISO text dates, or VBA dates.
 '-------------------------------------------------------------------------------
 Private Function FormatInputDate(ByVal varValue As Variant) As String
     Const METHOD_NAME As String = "FormatInputDate"
+    Dim dblSerialDate As Double
     Dim dtValue As Date
     Dim errDescription As String
     Dim errNumber As Long
@@ -297,25 +298,51 @@ Private Function FormatInputDate(ByVal varValue As Variant) As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    If IsError(varValue) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "An Excel error value cannot be converted to a date.")
+    If IsError(varValue) Then
+        Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "An Excel error value cannot be converted to a date.")
+    End If
 
     If IsNull(varValue) Or IsEmpty(varValue) Then GoTo ExitPoint
 
     strValue = Trim$(CStr(varValue))
     If Len(strValue) = 0 Then GoTo ExitPoint
 
-    If Len(strValue) = 10 And Mid$(strValue, 5, 1) = "-" And Mid$(strValue, 8, 1) = "-" Then
-        If Not IsNumeric(Left$(strValue, 4)) Or Not IsNumeric(Mid$(strValue, 6, 2)) Or Not IsNumeric(Right$(strValue, 2)) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
+    If IsNumeric(varValue) Then
+        dblSerialDate = CDbl(varValue)
+
+        If dblSerialDate <= 0 Or dblSerialDate > 2958465# Then
+            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid Excel serial date value: " & strValue)
+        End If
+
+        dtValue = DateSerial(1899, 12, 30) + dblSerialDate
+
+    ElseIf Len(strValue) = 10 And Mid$(strValue, 5, 1) = "-" And Mid$(strValue, 8, 1) = "-" Then
+        If Not IsNumeric(Left$(strValue, 4)) Then
+            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
+        End If
+
+        If Not IsNumeric(Mid$(strValue, 6, 2)) Then
+            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
+        End If
+
+        If Not IsNumeric(Right$(strValue, 2)) Then
+            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
+        End If
 
         lngYear = CLng(Left$(strValue, 4))
         lngMonth = CLng(Mid$(strValue, 6, 2))
         lngDay = CLng(Right$(strValue, 2))
         dtValue = DateSerial(lngYear, lngMonth, lngDay)
 
-        If Year(dtValue) <> lngYear Or Month(dtValue) <> lngMonth Or Day(dtValue) <> lngDay Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
-    Else
-        If Not IsDate(varValue) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unsupported input date value: " & strValue)
+        If Year(dtValue) <> lngYear Or Month(dtValue) <> lngMonth Or Day(dtValue) <> lngDay Then
+            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
+        End If
+
+    ElseIf IsDate(varValue) Then
         dtValue = CDate(varValue)
+
+    Else
+        Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unsupported input date value: " & strValue)
     End If
 
     strResult = Format$(dtValue, "dd.mm.yyyy")
