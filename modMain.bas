@@ -21,6 +21,7 @@ Public Sub RunDallasCashTransactions()
     Dim colDestinationRoots As Collection
     Dim colTeams As Collection
     Dim dictAccounts As Object
+    Dim dictAttachmentSubjects As Object
     Dim dictFundTeams As Object
     Dim errDescription As String
     Dim errNumber As Long
@@ -53,10 +54,10 @@ Public Sub RunDallasCashTransactions()
     strWorkspace = CreateRunWorkspace(dtRunTimestamp)
 
     Application.StatusBar = "Dallas Cash Transactions: downloading Outlook attachments..."
-    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace)
+    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace, dictAttachmentSubjects)
 
     Application.StatusBar = "Dallas Cash Transactions: merging input files..."
-    arrCombined = MergeInputFiles(colAttachmentPaths, appConfig.InputWorksheetName)
+    arrCombined = MergeInputFiles(colAttachmentPaths, appConfig.InputWorksheetName, dictAttachmentSubjects)
 
     Application.StatusBar = "Dallas Cash Transactions: loading the latest Fondsliste..."
     strLatestFondslistePath = GetLatestFondslistePath(appConfig)
@@ -80,6 +81,7 @@ Public Sub RunDallasCashTransactions()
 
 ExitPoint:
     Set dictAccounts = Nothing
+    Set dictAttachmentSubjects = Nothing
     Set dictFundTeams = Nothing
     Set colDestinationRoots = Nothing
     Set colTeams = Nothing
