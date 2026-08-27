@@ -1,0 +1,396 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modEmailDraft"
+Private Const MSIP_LABEL_SCHEMA As String = "http://schemas.microsoft.com/mapi/string/{00020386-0000-0000-C000-000000000046}/msip_labels"
+Private Const APPLY_INTERNAL_LABEL As Boolean = True
+Private Const INTERNAL_LABEL_METADATA As String = "MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_ActionId=079b8de1-6d2d-4ef9-8d3e-2638fcb38aaf;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_ContentBits=0;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_Enabled=true;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_Method=Privileged;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_Name=8ffbc0b8-e97b-47d1-beac-cb0955d66f3b;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_SetDate=2026-07-31T13:42:53Z;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_SiteId=614f9c25-bffa-42c7-86d8-964101f55fa2;MSIP_Label_8ffbc0b8-e97b-47d1-beac-cb0955d66f3b_Tag=10, 0, 1, 1;"
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig; arrCombined As Variant; colTeams As Collection; dtRunTimestamp As Date; blnLabelApplied As Boolean
+' Returns:       ---
+' Description:   Creates and saves an Outlook draft for the completed daily process.
+'-------------------------------------------------------------------------------
+Public Sub CreateCashTransactionsEmailDraft(ByRef appConfig As TAppConfig, ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal dtRunTimestamp As Date, ByRef blnLabelApplied As Boolean)
+    Const METHOD_NAME As String = "CreateCashTransactionsEmailDraft"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objOutlook As Object
+    Dim objMail As Object
+    Dim strBodyHtml As String
+    Dim strLocalFolder As String
+    Dim strSharePointUrl As String
+    Dim strSignatureHtml As String
+    Dim strSubject As String
+    Dim strTeamList As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strTeamList = BuildEmailTeamList(arrCombined, colTeams)
+    strSubject = BuildEmailSubject(appConfig.MailSubject, dtRunTimestamp, strTeamList)
+    strLocalFolder = GetEmailLocalFolder(appConfig, dtRunTimestamp)
+    strSharePointUrl = GetEmailSharePointUrl(appConfig)
+    strBodyHtml = BuildEmailBodyHtml(appConfig, arrCombined, dtRunTimestamp, strTeamList, strLocalFolder, strSharePointUrl)
+
+    Set objOutlook = CreateObject("Outlook.Application")
+    Set objMail = objOutlook.CreateItem(0)
+
+    If Len(Trim$(appConfig.MailFrom)) > 0 Then objMail.SentOnBehalfOfName = appConfig.MailFrom
+    objMail.To = appConfig.MailTo
+    objMail.Cc = appConfig.MailCc
+    objMail.Subject = strSubject
+
+    objMail.Display
+    strSignatureHtml = CStr(objMail.HTMLBody)
+    objMail.HTMLBody = "<div style='font-family:Arial;font-size:11pt;'>" & strBodyHtml & "</div><br>" & strSignatureHtml
+
+    blnLabelApplied = TryApplyInternalLabel(objMail)
+    objMail.Save
+
+ExitPoint:
+    Set objMail = Nothing
+    Set objOutlook = Nothing
+
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailTo;mailFrom;subject", appConfig.MailTo, appConfig.MailFrom, strSubject)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrCombined As Variant; colTeams As Collection
+' Returns:       String
+' Description:   Returns configured Teams that have at least one transaction in the current run.
+'-------------------------------------------------------------------------------
+Private Function BuildEmailTeamList(ByRef arrCombined As Variant, ByVal colTeams As Collection) As String
+    Const METHOD_NAME As String = "BuildEmailTeamList"
+    Dim dictTeamsWithTrades As Object
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngRow As Long
+    Dim lngTeam As Long
+    Dim strCurrentTeam As String
+    Dim strResult As String
+    Dim strTeam As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictTeamsWithTrades = CreateObject("Scripting.Dictionary")
+    dictTeamsWithTrades.CompareMode = vbTextCompare
+
+    For lngRow = 2 To UBound(arrCombined, 1)
+        strCurrentTeam = Trim$(CStr(arrCombined(lngRow, 5)))
+        If Len(strCurrentTeam) > 0 Then dictTeamsWithTrades(strCurrentTeam) = True
+    Next lngRow
+
+    For lngTeam = 1 To colTeams.Count
+        strTeam = Trim$(CStr(colTeams(lngTeam)))
+
+        If Len(strTeam) > 0 Then
+            If dictTeamsWithTrades.Exists(strTeam) Then
+                If Len(strResult) > 0 Then strResult = strResult & ", "
+                strResult = strResult & strTeam
+            End If
+        End If
+    Next lngTeam
+
+ExitPoint:
+    Set dictTeamsWithTrades = Nothing
+    If errNumber = 0 Then BuildEmailTeamList = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;team", lngRow, strCurrentTeam)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strBaseSubject As String; dtRunTimestamp As Date; strTeamList As String
+' Returns:       String
+' Description:   Builds the dynamic Outlook subject with date and affected Teams.
+'-------------------------------------------------------------------------------
+Private Function BuildEmailSubject(ByVal strBaseSubject As String, ByVal dtRunTimestamp As Date, ByVal strTeamList As String) As String
+    Const METHOD_NAME As String = "BuildEmailSubject"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+    Dim strStatus As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Len(strTeamList) > 0 Then
+        strStatus = "Team " & strTeamList
+    Else
+        strStatus = "no teams"
+    End If
+
+    strResult = Trim$(strBaseSubject) & " " & Format$(dtRunTimestamp, "dd/mm/yyyy") & " / " & strStatus
+
+ExitPoint:
+    If errNumber = 0 Then BuildEmailSubject = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "baseSubject;teamList", strBaseSubject, strTeamList)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig; arrCombined As Variant; dtRunTimestamp As Date; strTeamList As String; strLocalFolder As String; strSharePointUrl As String
+' Returns:       String
+' Description:   Builds an HTML email body from configured text and supported dynamic tokens.
+'-------------------------------------------------------------------------------
+Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrCombined As Variant, ByVal dtRunTimestamp As Date, ByVal strTeamList As String, ByVal strLocalFolder As String, ByVal strSharePointUrl As String) As String
+    Const METHOD_NAME As String = "BuildEmailBodyHtml"
+    Const SHAREPOINT_PLACEHOLDER As String = "[[SHAREPOINT_LINK_TOKEN]]"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngTransactionCount As Long
+    Dim strEncodedSharePoint As String
+    Dim strResult As String
+    Dim strSharePointHtml As String
+    Dim strTeamsToken As String
+    Dim strTemplate As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngTransactionCount = UBound(arrCombined, 1) - 1
+
+    If Len(strTeamList) > 0 Then
+        strTeamsToken = strTeamList
+        strTemplate = appConfig.MailBody
+        If Len(strTemplate) = 0 Then strTemplate = GetDefaultMailBody(True)
+    Else
+        strTeamsToken = "no teams"
+        strTemplate = appConfig.MailBodyNoTeams
+        If Len(strTemplate) = 0 Then strTemplate = GetDefaultMailBody(False)
+    End If
+
+    strTemplate = Replace$(strTemplate, "[RUN_DATE]", Format$(dtRunTimestamp, "dd/mm/yyyy"))
+    strTemplate = Replace$(strTemplate, "[CHECK_DATE]", Format$(dtRunTimestamp, "dd/mm/yyyy"))
+    strTemplate = Replace$(strTemplate, "[TEAMS]", strTeamsToken)
+    strTemplate = Replace$(strTemplate, "[LOCAL_FOLDER]", strLocalFolder)
+    strTemplate = Replace$(strTemplate, "[TRANSACTION_COUNT]", CStr(lngTransactionCount))
+    strTemplate = Replace$(strTemplate, "[SHAREPOINT_URL]", SHAREPOINT_PLACEHOLDER)
+
+    strResult = HtmlEncode(strTemplate)
+    strResult = Replace$(strResult, vbCrLf, "<br>")
+    strResult = Replace$(strResult, vbLf, "<br>")
+
+    If Len(strSharePointUrl) > 0 Then
+        strEncodedSharePoint = HtmlEncode(strSharePointUrl)
+        strSharePointHtml = "<a href='" & strEncodedSharePoint & "'>" & strEncodedSharePoint & "</a>"
+    Else
+        strSharePointHtml = "not configured"
+    End If
+
+    strResult = Replace$(strResult, HtmlEncode(SHAREPOINT_PLACEHOLDER), strSharePointHtml)
+
+ExitPoint:
+    If errNumber = 0 Then BuildEmailBodyHtml = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "teamList;localFolder;sharePointUrl", strTeamList, strLocalFolder, strSharePointUrl)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    blnHasTeams As Boolean
+' Returns:       String
+' Description:   Returns the default plain-text email body template.
+'-------------------------------------------------------------------------------
+Private Function GetDefaultMailBody(ByVal blnHasTeams As Boolean) As String
+    Const METHOD_NAME As String = "GetDefaultMailBody"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If blnHasTeams Then
+        strResult = "Hi Teams," & vbCrLf & vbCrLf
+        strResult = strResult & "New Cash Transactions are available for the following teams: [TEAMS]." & vbCrLf
+        strResult = strResult & "Please review and process the relevant transactions." & vbCrLf & vbCrLf
+    Else
+        strResult = "Hi Teams," & vbCrLf & vbCrLf
+        strResult = strResult & "There are no new Cash Transactions for the configured teams for [RUN_DATE]." & vbCrLf
+        strResult = strResult & "No team action is required." & vbCrLf & vbCrLf
+    End If
+
+    strResult = strResult & "Files location:" & vbCrLf
+    strResult = strResult & "Local: [LOCAL_FOLDER]" & vbCrLf
+    strResult = strResult & "SharePoint: [SHAREPOINT_URL]"
+
+ExitPoint:
+    If errNumber = 0 Then GetDefaultMailBody = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "hasTeams", blnHasTeams)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig; dtRunTimestamp As Date
+' Returns:       String
+' Description:   Returns the daily local output folder text for the email.
+'-------------------------------------------------------------------------------
+Private Function GetEmailLocalFolder(ByRef appConfig As TAppConfig, ByVal dtRunTimestamp As Date) As String
+    Const METHOD_NAME As String = "GetEmailLocalFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strLocalRoot As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If appConfig.SaveLocal Then
+        strLocalRoot = ResolveConfiguredPath(appConfig.OutputLocalBase)
+        strResult = BuildDatedFolderPath(strLocalRoot, DateValue(dtRunTimestamp))
+    Else
+        strResult = "not enabled"
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetEmailLocalFolder = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "saveLocal;outputLocalBase", appConfig.SaveLocal, appConfig.OutputLocalBase)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig
+' Returns:       String
+' Description:   Returns the browser SharePoint URL to include in the email body.
+'-------------------------------------------------------------------------------
+Private Function GetEmailSharePointUrl(ByRef appConfig As TAppConfig) As String
+    Const METHOD_NAME As String = "GetEmailSharePointUrl"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(appConfig.MailSharePointUrl)
+
+    If Len(strResult) = 0 Then
+        If appConfig.SaveSharePoint Then
+            If IsHttpPath(appConfig.OutputSharePointBase) Then strResult = Trim$(appConfig.OutputSharePointBase)
+        End If
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetEmailSharePointUrl = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailSharePointUrl;outputSharePointBase", appConfig.MailSharePointUrl, appConfig.OutputSharePointBase)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strValue As String
+' Returns:       String
+' Description:   HTML-encodes text before insertion into Outlook HTMLBody.
+'-------------------------------------------------------------------------------
+Private Function HtmlEncode(ByVal strValue As String) As String
+    Const METHOD_NAME As String = "HtmlEncode"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = strValue
+    strResult = Replace$(strResult, "&", "&amp;")
+    strResult = Replace$(strResult, "<", "&lt;")
+    strResult = Replace$(strResult, ">", "&gt;")
+    strResult = Replace$(strResult, Chr$(34), "&quot;")
+    strResult = Replace$(strResult, "'", "&#39;")
+
+ExitPoint:
+    If errNumber = 0 Then HtmlEncode = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    objMail As Object
+' Returns:       Boolean
+' Description:   Applies the Internal MIP label on a best-effort basis without blocking draft creation.
+'-------------------------------------------------------------------------------
+Private Function TryApplyInternalLabel(ByVal objMail As Object) As Boolean
+    Const METHOD_NAME As String = "TryApplyInternalLabel"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not APPLY_INTERNAL_LABEL Then
+        blnResult = True
+        GoTo ExitPoint
+    End If
+
+    objMail.PropertyAccessor.SetProperty MSIP_LABEL_SCHEMA, INTERNAL_LABEL_METADATA
+    blnResult = True
+
+ExitPoint:
+    TryApplyInternalLabel = blnResult
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    blnResult = False
+    GoTo ExitPoint
+End Function
