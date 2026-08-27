@@ -4,10 +4,10 @@ Private Const CLASS_NAME As String = "modFileSystem"
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    strPath As String
 ' Returns:       String
-' Description:   Resolves local, UNC, WebDAV, or HTTPS configuration paths.
+' Description:   Resolves local, UNC, WebDAV, or HTTPS source paths.
 '-------------------------------------------------------------------------------
 Public Function ResolveConfiguredPath(ByVal strPath As String) As String
     Const METHOD_NAME As String = "ResolveConfiguredPath"
@@ -18,10 +18,9 @@ Public Function ResolveConfiguredPath(ByVal strPath As String) As String
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     strResult = Trim$(strPath)
-
     If Len(strResult) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "A configured path is blank.")
 
-    If LCase$(Left$(strResult, 8)) = "https://" Or LCase$(Left$(strResult, 7)) = "http://" Then
+    If IsHttpPath(strResult) Then
         strResult = ConvertHttpUrlToWebDav(strResult)
     Else
         strResult = NormalizeBackslashes(strResult)
@@ -40,6 +39,129 @@ ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strPath As String
+' Returns:       Boolean
+' Description:   Returns True when the value is an HTTP or HTTPS URL.
+'-------------------------------------------------------------------------------
+Public Function IsHttpPath(ByVal strPath As String) As Boolean
+    Const METHOD_NAME As String = "IsHttpPath"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strValue = LCase$(Trim$(strPath))
+    blnResult = Left$(strValue, 8) = "https://" Or Left$(strValue, 7) = "http://"
+
+ExitPoint:
+    If errNumber = 0 Then IsHttpPath = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Resolves output paths while preserving clean SharePoint HTTPS URLs.
+'-------------------------------------------------------------------------------
+Public Function ResolveOutputPath(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "ResolveOutputPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsHttpPath(strPath) Then
+        strResult = NormalizeHttpUrl(strPath)
+    Else
+        strResult = ResolveConfiguredPath(strPath)
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then ResolveOutputPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strUrl As String
+' Returns:       String
+' Description:   Normalizes a clean HTTP/HTTPS SharePoint URL without converting it to WebDAV.
+'-------------------------------------------------------------------------------
+Private Function NormalizeHttpUrl(ByVal strUrl As String) As String
+    Const METHOD_NAME As String = "NormalizeHttpUrl"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngFragmentPosition As Long
+    Dim lngQueryPosition As Long
+    Dim lngSchemePosition As Long
+    Dim strPrefix As String
+    Dim strRemainder As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(strUrl)
+    strResult = Replace$(strResult, "\", "/")
+
+    If Not IsHttpPath(strResult) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The output URL must start with http:// or https://.")
+    If InStr(1, LCase$(strResult), "/forms/allitems.aspx", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Use a clean SharePoint folder URL, not a Forms/AllItems.aspx browser-view URL.")
+    If InStr(1, LCase$(strResult), "/shared?", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Use a clean SharePoint folder URL, not a /shared?id= sharing URL.")
+
+    lngQueryPosition = InStr(1, strResult, "?", vbBinaryCompare)
+    If lngQueryPosition > 0 Then strResult = Left$(strResult, lngQueryPosition - 1)
+
+    lngFragmentPosition = InStr(1, strResult, "#", vbBinaryCompare)
+    If lngFragmentPosition > 0 Then strResult = Left$(strResult, lngFragmentPosition - 1)
+
+    lngSchemePosition = InStr(1, strResult, "://", vbBinaryCompare)
+    strPrefix = Left$(strResult, lngSchemePosition + 2)
+    strRemainder = Mid$(strResult, lngSchemePosition + 3)
+
+    Do While InStr(1, strRemainder, "//", vbBinaryCompare) > 0
+        strRemainder = Replace$(strRemainder, "//", "/")
+    Loop
+
+    strResult = strPrefix & strRemainder
+    strResult = Replace$(strResult, " ", "%20")
+
+    Do While Len(strResult) > Len(strPrefix) And Right$(strResult, 1) = "/"
+        strResult = Left$(strResult, Len(strResult) - 1)
+    Loop
+
+ExitPoint:
+    If errNumber = 0 Then NormalizeHttpUrl = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "url", strUrl)
     GoTo ExitPoint
 End Function
 
@@ -201,10 +323,10 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    strLeft As String; strRight As String
 ' Returns:       String
-' Description:   Combines two file-system path components.
+' Description:   Combines Windows paths or clean HTTP/HTTPS SharePoint URL components.
 '-------------------------------------------------------------------------------
 Public Function CombinePath(ByVal strLeft As String, ByVal strRight As String) As String
     Const METHOD_NAME As String = "CombinePath"
@@ -216,23 +338,40 @@ Public Function CombinePath(ByVal strLeft As String, ByVal strRight As String) A
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    strLeftPart = NormalizeBackslashes(strLeft)
-    strRightPart = NormalizeBackslashes(strRight)
+    If IsHttpPath(strLeft) Then
+        strLeftPart = NormalizeHttpUrl(strLeft)
+        strRightPart = Replace$(Trim$(strRight), "\", "/")
 
-    Do While Len(strLeftPart) > 3 And Right$(strLeftPart, 1) = "\"
-        strLeftPart = Left$(strLeftPart, Len(strLeftPart) - 1)
-    Loop
+        Do While Len(strRightPart) > 0 And Left$(strRightPart, 1) = "/"
+            strRightPart = Mid$(strRightPart, 2)
+        Loop
 
-    Do While Len(strRightPart) > 0 And Left$(strRightPart, 1) = "\"
-        strRightPart = Mid$(strRightPart, 2)
-    Loop
+        strRightPart = Replace$(strRightPart, " ", "%20")
 
-    If Len(strRightPart) = 0 Then
-        strResult = strLeftPart
-    ElseIf Right$(strLeftPart, 1) = "\" Then
-        strResult = strLeftPart & strRightPart
+        If Len(strRightPart) = 0 Then
+            strResult = strLeftPart
+        Else
+            strResult = strLeftPart & "/" & strRightPart
+        End If
     Else
-        strResult = strLeftPart & "\" & strRightPart
+        strLeftPart = NormalizeBackslashes(strLeft)
+        strRightPart = NormalizeBackslashes(strRight)
+
+        Do While Len(strLeftPart) > 3 And Right$(strLeftPart, 1) = "\"
+            strLeftPart = Left$(strLeftPart, Len(strLeftPart) - 1)
+        Loop
+
+        Do While Len(strRightPart) > 0 And Left$(strRightPart, 1) = "\"
+            strRightPart = Mid$(strRightPart, 2)
+        Loop
+
+        If Len(strRightPart) = 0 Then
+            strResult = strLeftPart
+        ElseIf Right$(strLeftPart, 1) = "\" Then
+            strResult = strLeftPart & strRightPart
+        Else
+            strResult = strLeftPart & "\" & strRightPart
+        End If
     End If
 
 ExitPoint:
@@ -246,13 +385,12 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "leftPath;rightPath", strLeft, strRight)
     GoTo ExitPoint
 End Function
-
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    strFolderPath As String
 ' Returns:       ---
-' Description:   Creates a folder and any missing parent folders.
+' Description:   Creates local/UNC/WebDAV folders; clean HTTPS SharePoint folders must already exist.
 '-------------------------------------------------------------------------------
 Public Sub EnsureFolderExists(ByVal strFolderPath As String)
     Const METHOD_NAME As String = "EnsureFolderExists"
@@ -263,6 +401,8 @@ Public Sub EnsureFolderExists(ByVal strFolderPath As String)
     Dim strResolvedPath As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsHttpPath(strFolderPath) Then GoTo ExitPoint
 
     strResolvedPath = ResolveConfiguredPath(strFolderPath)
     Set objFileSystem = CreateObject("Scripting.FileSystemObject")
@@ -287,7 +427,6 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath", strFolderPath)
     GoTo ExitPoint
 End Sub
-
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-26
@@ -362,10 +501,10 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    strSourcePath As String; strDestinationFolder As String
 ' Returns:       ---
-' Description:   Copies one file to an existing or newly created folder.
+' Description:   Copies an Excel file to a Windows folder or directly to a clean SharePoint HTTPS URL.
 '-------------------------------------------------------------------------------
 Public Sub CopyFileToFolder(ByVal strSourcePath As String, ByVal strDestinationFolder As String)
     Const METHOD_NAME As String = "CopyFileToFolder"
@@ -381,8 +520,12 @@ Public Sub CopyFileToFolder(ByVal strSourcePath As String, ByVal strDestinationF
 
     If Not objFileSystem.FileExists(strSourcePath) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Source file does not exist: " & strSourcePath)
 
-    strDestinationPath = CombinePath(strDestinationFolder, objFileSystem.GetFileName(strSourcePath))
-    Call objFileSystem.CopyFile(strSourcePath, strDestinationPath, True)
+    If IsHttpPath(strDestinationFolder) Then
+        Call CopyExcelWorkbookToHttpFolder(strSourcePath, strDestinationFolder)
+    Else
+        strDestinationPath = CombinePath(strDestinationFolder, objFileSystem.GetFileName(strSourcePath))
+        Call objFileSystem.CopyFile(strSourcePath, strDestinationPath, True)
+    End If
 
 ExitPoint:
     Set objFileSystem = Nothing
@@ -395,7 +538,64 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sourcePath;destinationFolder", strSourcePath, strDestinationFolder)
     GoTo ExitPoint
 End Sub
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strSourcePath As String; strDestinationFolder As String
+' Returns:       ---
+' Description:   Publishes a local Excel workbook to an existing SharePoint HTTPS folder using Excel SaveCopyAs.
+'-------------------------------------------------------------------------------
+Private Sub CopyExcelWorkbookToHttpFolder(ByVal strSourcePath As String, ByVal strDestinationFolder As String)
+    Const METHOD_NAME As String = "CopyExcelWorkbookToHttpFolder"
+    Dim blnCloseRequired As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strDestinationPath As String
+    Dim strExtension As String
+    Dim wkbAlreadyOpen As Excel.Workbook
+    Dim wkbSource As Excel.Workbook
 
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    strExtension = GetFileExtension(strSourcePath)
+
+    If strExtension <> ".xls" And strExtension <> ".xlsx" Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "HTTPS publishing currently supports Excel .xls and .xlsx files only: " & strSourcePath)
+
+    strDestinationPath = CombinePath(strDestinationFolder, objFileSystem.GetFileName(strSourcePath))
+    Set wkbAlreadyOpen = GetOpenWorkbookByFullName(strSourcePath, False)
+
+    If wkbAlreadyOpen Is Nothing Then
+        Set wkbSource = Application.Workbooks.Open(Filename:=strSourcePath, UpdateLinks:=0, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
+        blnCloseRequired = True
+    Else
+        Set wkbSource = wkbAlreadyOpen
+    End If
+
+    If wkbSource Is Nothing Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The staged Excel workbook could not be opened for HTTPS publishing: " & strSourcePath)
+
+    Call wkbSource.SaveCopyAs(strDestinationPath)
+
+ExitPoint:
+    Set wkbAlreadyOpen = Nothing
+    Set objFileSystem = Nothing
+
+    If blnCloseRequired Then
+        blnCloseRequired = False
+        Call wkbSource.Close(SaveChanges:=False)
+    End If
+
+    Set wkbSource = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = "HTTPS SharePoint upload failed. The target SharePoint folder must already exist and the current Office user must have write access. Target: " & strDestinationPath & ". Original error: " & VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sourcePath;destinationFolder;destinationPath", strSourcePath, strDestinationFolder, strDestinationPath)
+    GoTo ExitPoint
+End Sub
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-26
@@ -538,10 +738,10 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    strPath As String
 ' Returns:       String
-' Description:   Normalizes a workbook path for case-insensitive comparison.
+' Description:   Normalizes a workbook path or SharePoint HTTPS URL for comparison.
 '-------------------------------------------------------------------------------
 Public Function NormalizeWorkbookPath(ByVal strPath As String) As String
     Const METHOD_NAME As String = "NormalizeWorkbookPath"
@@ -551,12 +751,16 @@ Public Function NormalizeWorkbookPath(ByVal strPath As String) As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    strResult = ResolveConfiguredPath(strPath)
-    strResult = NormalizeBackslashes(strResult)
+    If IsHttpPath(strPath) Then
+        strResult = NormalizeHttpUrl(strPath)
+    Else
+        strResult = ResolveConfiguredPath(strPath)
+        strResult = NormalizeBackslashes(strResult)
 
-    Do While Len(strResult) > 3 And Right$(strResult, 1) = "\"
-        strResult = Left$(strResult, Len(strResult) - 1)
-    Loop
+        Do While Len(strResult) > 3 And Right$(strResult, 1) = "\"
+            strResult = Left$(strResult, Len(strResult) - 1)
+        Loop
+    End If
 
     strResult = LCase$(strResult)
 
@@ -571,7 +775,6 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
     GoTo ExitPoint
 End Function
-
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-26
