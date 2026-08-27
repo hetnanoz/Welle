@@ -160,8 +160,10 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     End If
 
     If blnNewWorkbook Then
+        Call ApplyWorkbookSensitivityLabel(wkbHistory)
         Call wkbHistory.SaveAs(Filename:=strHistoricalPath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False, AddToMru:=False, Local:=True)
     ElseIf lngNewCount > 0 Then
+        Call ApplyWorkbookSensitivityLabel(wkbHistory)
         Call wkbHistory.Save
     End If
 
