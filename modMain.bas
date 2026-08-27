@@ -13,6 +13,8 @@ Public Sub RunDallasCashTransactions()
     Const METHOD_NAME As String = "RunDallasCashTransactions"
     Dim appConfig As TAppConfig
     Dim arrCombined As Variant
+    Dim blnEmailDraftCreated As Boolean
+    Dim blnEmailLabelApplied As Boolean
     Dim blnPreviousDisplayAlerts As Boolean
     Dim blnPreviousEnableEvents As Boolean
     Dim blnPreviousScreenUpdating As Boolean
@@ -96,10 +98,16 @@ Public Sub RunDallasCashTransactions()
         Call UpdateHistoricalFiles(arrCombined, colTeams, colDestinationRoots)
     End If
 
+    If appConfig.CreateEmailDraft Then
+        Application.StatusBar = "Dallas Cash Transactions: creating Outlook email draft..."
+        Call CreateCashTransactionsEmailDraft(appConfig, arrCombined, colTeams, dtRunTimestamp, blnEmailLabelApplied)
+        blnEmailDraftCreated = True
+    End If
+
     Application.StatusBar = "Dallas Cash Transactions: archiving processed Outlook messages..."
     Call ArchiveProcessedOutlookMessages(appConfig, dictProcessedMailSubjects)
 
-    strSuccessMessage = BuildSuccessMessage(arrCombined, colTeams, colAttachmentPaths.Count, dictProcessedMailSubjects.Count)
+    strSuccessMessage = BuildSuccessMessage(arrCombined, colTeams, colAttachmentPaths.Count, dictProcessedMailSubjects.Count, appConfig.CreateEmailDraft, blnEmailDraftCreated, blnEmailLabelApplied)
 
 ExitPoint:
     Set dictAccounts = Nothing
@@ -141,11 +149,11 @@ End Sub
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    arrCombined As Variant; colTeams As Collection; lngAttachmentCount As Long; lngMailCount As Long
+' Parameters:    arrCombined As Variant; colTeams As Collection; lngAttachmentCount As Long; lngMailCount As Long; blnEmailRequested As Boolean; blnEmailDraftCreated As Boolean; blnEmailLabelApplied As Boolean
 ' Returns:       String
 ' Description:   Builds the final success message with transaction counts per team.
 '-------------------------------------------------------------------------------
-Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal lngAttachmentCount As Long, ByVal lngMailCount As Long) As String
+Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal lngAttachmentCount As Long, ByVal lngMailCount As Long, ByVal blnEmailRequested As Boolean, ByVal blnEmailDraftCreated As Boolean, ByVal blnEmailLabelApplied As Boolean) As String
     Const METHOD_NAME As String = "BuildSuccessMessage"
     Dim arrKeys As Variant
     Dim dictConfigured As Object
@@ -219,6 +227,24 @@ Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeam
     strResult = strResult & "Excel attachments processed: " & CStr(lngAttachmentCount) & vbCrLf
     strResult = strResult & "Outlook messages archived: " & CStr(lngMailCount) & vbCrLf
     strResult = strResult & "Teams with trades: " & strTeamsWithTrades
+
+    If blnEmailRequested Then
+        strResult = strResult & vbCrLf
+
+        If blnEmailDraftCreated Then
+            strResult = strResult & "Outlook email draft: created"
+        Else
+            strResult = strResult & "Outlook email draft: not created"
+        End If
+
+        strResult = strResult & vbCrLf
+
+        If blnEmailLabelApplied Then
+            strResult = strResult & "Outlook Internal label: applied"
+        Else
+            strResult = strResult & "Outlook Internal label: not applied (best effort)"
+        End If
+    End If
 
     If lngOtherCount > 0 Then
         strResult = strResult & vbCrLf
