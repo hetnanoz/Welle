@@ -107,6 +107,8 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     Dim lngSourceColumn As Long
     Dim lngSourceRow As Long
     Dim lngTargetColumn As Long
+    Dim strAccountContext As String
+    Dim strDisplayedAccount As String
     Dim wkbInput As Excel.Workbook
     Dim wksCandidate As Excel.Worksheet
     Dim wksInput As Excel.Worksheet
@@ -153,7 +155,14 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
             For lngTargetColumn = 1 To INPUT_COLUMN_COUNT
                 If dictColumnMap.Exists(lngTargetColumn) Then
                     lngSourceColumn = CLng(dictColumnMap(lngTargetColumn))
-                    arrData(lngOutputRow, lngTargetColumn) = arrSource(lngSourceRow, lngSourceColumn)
+
+                    If lngTargetColumn = 1 Then
+                        strAccountContext = "Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'."
+                        strDisplayedAccount = CStr(wksInput.Cells(INPUT_FIRST_DATA_ROW + lngSourceRow - 1, lngSourceColumn).Text)
+                        arrData(lngOutputRow, lngTargetColumn) = NormalizeAccountIdentifier(arrSource(lngSourceRow, lngSourceColumn), strDisplayedAccount, ERROR_INPUT_DATA, strAccountContext)
+                    Else
+                        arrData(lngOutputRow, lngTargetColumn) = arrSource(lngSourceRow, lngSourceColumn)
+                    End If
                 Else
                     arrData(lngOutputRow, lngTargetColumn) = vbNullString
                 End If
