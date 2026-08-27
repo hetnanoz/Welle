@@ -23,6 +23,7 @@ Public Sub RunDallasCashTransactions()
     Dim dictAccounts As Object
     Dim dictAttachmentSubjects As Object
     Dim dictFundTeams As Object
+    Dim dictProcessedMailSubjects As Object
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngPreviousAutomationSecurity As Long
@@ -54,10 +55,13 @@ Public Sub RunDallasCashTransactions()
     strWorkspace = CreateRunWorkspace(dtRunTimestamp)
 
     Application.StatusBar = "Dallas Cash Transactions: downloading Outlook attachments..."
-    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace, dictAttachmentSubjects)
+    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace, dictAttachmentSubjects, dictProcessedMailSubjects)
 
     Application.StatusBar = "Dallas Cash Transactions: merging input files..."
     arrCombined = MergeInputFiles(colAttachmentPaths, appConfig.InputWorksheetName, dictAttachmentSubjects)
+
+    Application.StatusBar = "Dallas Cash Transactions: removing duplicate transactions..."
+    arrCombined = DeduplicateCurrentTransactions(arrCombined)
 
     Application.StatusBar = "Dallas Cash Transactions: loading the latest Fondsliste..."
     strLatestFondslistePath = GetLatestFondslistePath(appConfig)
@@ -79,10 +83,14 @@ Public Sub RunDallasCashTransactions()
         Call UpdateHistoricalFiles(arrCombined, colTeams, colDestinationRoots)
     End If
 
+    Application.StatusBar = "Dallas Cash Transactions: archiving processed Outlook messages..."
+    Call ArchiveProcessedOutlookMessages(appConfig, dictProcessedMailSubjects)
+
 ExitPoint:
     Set dictAccounts = Nothing
     Set dictAttachmentSubjects = Nothing
     Set dictFundTeams = Nothing
+    Set dictProcessedMailSubjects = Nothing
     Set colDestinationRoots = Nothing
     Set colTeams = Nothing
     Set colAttachmentPaths = Nothing
