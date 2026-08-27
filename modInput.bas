@@ -7,7 +7,7 @@ Private Const CLASS_NAME As String = "modInput"
 ' Creation date: 2026-08-27
 ' Parameters:    colAttachmentPaths As Collection; strWorksheetName As String; dictAttachmentSubjects As Object
 ' Returns:       Variant
-' Description:   Merges A:P input files and preserves the Outlook subject for source-aware validation errors.
+' Description:   Merges source files after mapping input columns by header name.
 '-------------------------------------------------------------------------------
 Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal strWorksheetName As String, ByVal dictAttachmentSubjects As Object) As Variant
     Const METHOD_NAME As String = "MergeInputFiles"
@@ -90,16 +90,23 @@ End Function
 ' Creation date: 2026-08-27
 ' Parameters:    strFilePath As String; strWorksheetName As String; strMailSubject As String; arrData As Variant; lngDataRows As Long
 ' Returns:       ---
-' Description:   Reads one input workbook and includes the source Outlook subject in validation failures.
+' Description:   Reads one input workbook and normalizes its columns by header.
 '-------------------------------------------------------------------------------
 Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetName As String, ByVal strMailSubject As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
     Const METHOD_NAME As String = "ReadInputFileData"
+    Dim arrSource As Variant
     Dim blnCloseRequired As Boolean
+    Dim dictColumnMap As Object
     Dim errDescription As String
     Dim errNumber As Long
     Dim handlerErrDescription As String
     Dim handlerErrNumber As Long
+    Dim lngLastColumn As Long
     Dim lngLastRow As Long
+    Dim lngOutputRow As Long
+    Dim lngSourceColumn As Long
+    Dim lngSourceRow As Long
+    Dim lngTargetColumn As Long
     Dim wkbInput As Excel.Workbook
     Dim wksCandidate As Excel.Worksheet
     Dim wksInput As Excel.Worksheet
@@ -122,16 +129,40 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     Next wksCandidate
 
     If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Worksheet '" & strWorksheetName & "' was not found in input file '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
-    Call ValidateInputHeader(wksInput, strFilePath, strMailSubject)
 
-    lngLastRow = GetInputLastRow(wksInput)
+    lngLastColumn = GetInputLastHeaderColumn(wksInput)
+    lngLastRow = GetInputLastRow(wksInput, lngLastColumn)
 
-    If lngLastRow >= INPUT_FIRST_DATA_ROW Then
-        lngDataRows = lngLastRow - INPUT_HEADER_ROW
-        arrData = wksInput.Range(wksInput.Cells(INPUT_FIRST_DATA_ROW, 1), wksInput.Cells(lngLastRow, INPUT_COLUMN_COUNT)).Value2
-    End If
+    If lngLastRow < INPUT_FIRST_DATA_ROW Then GoTo ExitPoint
+
+    arrSource = wksInput.Range(wksInput.Cells(INPUT_FIRST_DATA_ROW, 1), wksInput.Cells(lngLastRow, lngLastColumn)).Value2
+
+    If Not ArrayContainsInputData(arrSource) Then GoTo ExitPoint
+
+    Set dictColumnMap = BuildInputColumnMap(wksInput, lngLastColumn, strFilePath, strMailSubject)
+    lngDataRows = CountInputDataRows(arrSource, dictColumnMap)
+
+    If lngDataRows = 0 Then GoTo ExitPoint
+
+    ReDim arrData(1 To lngDataRows, 1 To INPUT_COLUMN_COUNT)
+
+    For lngSourceRow = 1 To UBound(arrSource, 1)
+        If InputRowHasData(arrSource, lngSourceRow, dictColumnMap) Then
+            lngOutputRow = lngOutputRow + 1
+
+            For lngTargetColumn = 1 To INPUT_COLUMN_COUNT
+                If dictColumnMap.Exists(lngTargetColumn) Then
+                    lngSourceColumn = CLng(dictColumnMap(lngTargetColumn))
+                    arrData(lngOutputRow, lngTargetColumn) = arrSource(lngSourceRow, lngSourceColumn)
+                Else
+                    arrData(lngOutputRow, lngTargetColumn) = vbNullString
+                End If
+            Next lngTargetColumn
+        End If
+    Next lngSourceRow
 
 ExitPoint:
+    Set dictColumnMap = Nothing
     Set wksCandidate = Nothing
     Set wksInput = Nothing
 
@@ -159,41 +190,331 @@ End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
-' Parameters:    wksInput As Excel.Worksheet; strFilePath As String; strMailSubject As String
-' Returns:       ---
-' Description:   Validates the required sixteen-column header and identifies the source Outlook mail on failure.
+' Creation date: 2026-08-27
+' Parameters:    wksInput As Excel.Worksheet; lngLastColumn As Long; strFilePath As String; strMailSubject As String
+' Returns:       Object
+' Description:   Maps source header positions to the canonical sixteen columns.
 '-------------------------------------------------------------------------------
-Private Sub ValidateInputHeader(ByVal wksInput As Excel.Worksheet, ByVal strFilePath As String, ByVal strMailSubject As String)
-    Const METHOD_NAME As String = "ValidateInputHeader"
+Private Function BuildInputColumnMap(ByVal wksInput As Excel.Worksheet, ByVal lngLastColumn As Long, ByVal strFilePath As String, ByVal strMailSubject As String) As Object
+    Const METHOD_NAME As String = "BuildInputColumnMap"
     Dim arrHeaders As Variant
+    Dim dictColumnMap As Object
+    Dim dictExpected As Object
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngColumn As Long
-    Dim strActual As String
-    Dim strExpected As String
+    Dim lngTargetColumn As Long
+    Dim strActualHeader As String
+    Dim strExpectedHeader As String
+    Dim strHeaderKey As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     arrHeaders = GetInputHeaders()
 
-    For lngColumn = 1 To INPUT_COLUMN_COUNT
-        strActual = Trim$(CStr(wksInput.Cells(INPUT_HEADER_ROW, lngColumn).Value2))
-        strExpected = CStr(arrHeaders(lngColumn - 1))
+    Set dictExpected = CreateObject("Scripting.Dictionary")
+    dictExpected.CompareMode = vbTextCompare
 
-        If StrComp(strActual, strExpected, vbTextCompare) <> 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unexpected header in column " & CStr(lngColumn) & ". Outlook mail subject: '" & strMailSubject & "'. Expected '" & strExpected & "' and found '" & strActual & "'.")
+    Set dictColumnMap = CreateObject("Scripting.Dictionary")
+    dictColumnMap.CompareMode = vbTextCompare
+
+    For lngTargetColumn = 1 To INPUT_COLUMN_COUNT
+        strExpectedHeader = CStr(arrHeaders(lngTargetColumn - 1))
+        strHeaderKey = NormalizeHeaderName(strExpectedHeader)
+        dictExpected(strHeaderKey) = lngTargetColumn
+    Next lngTargetColumn
+
+    For lngColumn = 1 To lngLastColumn
+        strActualHeader = GetHeaderText(wksInput.Cells(INPUT_HEADER_ROW, lngColumn).Value2)
+        strHeaderKey = NormalizeHeaderName(strActualHeader)
+
+        If Len(strHeaderKey) > 0 Then
+            If dictExpected.Exists(strHeaderKey) Then
+                lngTargetColumn = CLng(dictExpected(strHeaderKey))
+
+                If dictColumnMap.Exists(lngTargetColumn) Then
+                    strExpectedHeader = CStr(arrHeaders(lngTargetColumn - 1))
+                    Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Duplicate input header matching '" & strExpectedHeader & "' was found. Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
+                End If
+
+                dictColumnMap.Add lngTargetColumn, lngColumn
+            End If
+        End If
     Next lngColumn
 
+    For lngTargetColumn = 1 To INPUT_COLUMN_COUNT
+        If IsRequiredInputHeader(lngTargetColumn) Then
+            If Not dictColumnMap.Exists(lngTargetColumn) Then
+                strExpectedHeader = CStr(arrHeaders(lngTargetColumn - 1))
+                Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Required input header '" & strExpectedHeader & "' was not found in a non-empty input file. Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
+            End If
+        End If
+    Next lngTargetColumn
+
 ExitPoint:
+    Set dictExpected = Nothing
+    If errNumber = 0 Then Set BuildInputColumnMap = dictColumnMap
+    Set dictColumnMap = Nothing
     If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
-    Exit Sub
+    Exit Function
 
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "filePath;column;mailSubject", strFilePath, lngColumn, strMailSubject)
     GoTo ExitPoint
-End Sub
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    varHeader As Variant
+' Returns:       String
+' Description:   Converts one header cell to trimmed text.
+'-------------------------------------------------------------------------------
+Private Function GetHeaderText(ByVal varHeader As Variant) As String
+    Const METHOD_NAME As String = "GetHeaderText"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(varHeader) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "An Excel error value cannot be used as an input header.")
+
+    If IsNull(varHeader) Or IsEmpty(varHeader) Then
+        strResult = vbNullString
+    Else
+        strResult = Trim$(CStr(varHeader))
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetHeaderText = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strHeader As String
+' Returns:       String
+' Description:   Normalizes source headers and supported known aliases.
+'-------------------------------------------------------------------------------
+Private Function NormalizeHeaderName(ByVal strHeader As String) As String
+    Const METHOD_NAME As String = "NormalizeHeaderName"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(strHeader)
+    strResult = Replace$(strResult, Chr$(160), " ")
+    strResult = Replace$(strResult, vbCr, " ")
+    strResult = Replace$(strResult, vbLf, " ")
+    strResult = Replace$(strResult, vbTab, " ")
+
+    Do While InStr(1, strResult, "  ", vbBinaryCompare) > 0
+        strResult = Replace$(strResult, "  ", " ")
+    Loop
+
+    strResult = LCase$(strResult)
+    strResult = Replace$(strResult, ".", vbNullString)
+
+    If StrComp(strResult, "accout name", vbTextCompare) = 0 Then strResult = "account name"
+
+ExitPoint:
+    If errNumber = 0 Then NormalizeHeaderName = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "header", strHeader)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    lngTargetColumn As Long
+' Returns:       Boolean
+' Description:   Treats Account Name as optional and all other source headers as required.
+'-------------------------------------------------------------------------------
+Private Function IsRequiredInputHeader(ByVal lngTargetColumn As Long) As Boolean
+    Const METHOD_NAME As String = "IsRequiredInputHeader"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    blnResult = lngTargetColumn <> 2
+
+ExitPoint:
+    If errNumber = 0 Then IsRequiredInputHeader = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "targetColumn", lngTargetColumn)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrSource As Variant
+' Returns:       Boolean
+' Description:   Checks whether the data area contains any non-empty values.
+'-------------------------------------------------------------------------------
+Private Function ArrayContainsInputData(ByRef arrSource As Variant) As Boolean
+    Const METHOD_NAME As String = "ArrayContainsInputData"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumn As Long
+    Dim lngRow As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngRow = 1 To UBound(arrSource, 1)
+        For lngColumn = 1 To UBound(arrSource, 2)
+            If IsInputValuePopulated(arrSource(lngRow, lngColumn)) Then
+                blnResult = True
+                GoTo ExitPoint
+            End If
+        Next lngColumn
+    Next lngRow
+
+ExitPoint:
+    If errNumber = 0 Then ArrayContainsInputData = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;column", lngRow, lngColumn)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrSource As Variant; dictColumnMap As Object
+' Returns:       Long
+' Description:   Counts non-empty transaction rows after header mapping.
+'-------------------------------------------------------------------------------
+Private Function CountInputDataRows(ByRef arrSource As Variant, ByVal dictColumnMap As Object) As Long
+    Const METHOD_NAME As String = "CountInputDataRows"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngResult As Long
+    Dim lngRow As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngRow = 1 To UBound(arrSource, 1)
+        If InputRowHasData(arrSource, lngRow, dictColumnMap) Then lngResult = lngResult + 1
+    Next lngRow
+
+ExitPoint:
+    If errNumber = 0 Then CountInputDataRows = lngResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row", lngRow)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrSource As Variant; lngRow As Long; dictColumnMap As Object
+' Returns:       Boolean
+' Description:   Checks whether a source row contains data in any recognized column.
+'-------------------------------------------------------------------------------
+Private Function InputRowHasData(ByRef arrSource As Variant, ByVal lngRow As Long, ByVal dictColumnMap As Object) As Boolean
+    Const METHOD_NAME As String = "InputRowHasData"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngSourceColumn As Long
+    Dim lngTargetColumn As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngTargetColumn = 1 To INPUT_COLUMN_COUNT
+        If dictColumnMap.Exists(lngTargetColumn) Then
+            lngSourceColumn = CLng(dictColumnMap(lngTargetColumn))
+
+            If IsInputValuePopulated(arrSource(lngRow, lngSourceColumn)) Then
+                blnResult = True
+                GoTo ExitPoint
+            End If
+        End If
+    Next lngTargetColumn
+
+ExitPoint:
+    If errNumber = 0 Then InputRowHasData = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;targetColumn", lngRow, lngTargetColumn)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    varValue As Variant
+' Returns:       Boolean
+' Description:   Checks whether one input value should count as populated.
+'-------------------------------------------------------------------------------
+Private Function IsInputValuePopulated(ByVal varValue As Variant) As Boolean
+    Const METHOD_NAME As String = "IsInputValuePopulated"
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(varValue) Then
+        blnResult = True
+    ElseIf IsNull(varValue) Or IsEmpty(varValue) Then
+        blnResult = False
+    Else
+        blnResult = Len(Trim$(CStr(varValue))) > 0
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then IsInputValuePopulated = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -234,28 +555,23 @@ End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    wksInput As Excel.Worksheet
 ' Returns:       Long
-' Description:   Finds the last populated row across all sixteen input columns.
+' Description:   Finds the last non-empty header column on the configured input sheet.
 '-------------------------------------------------------------------------------
-Private Function GetInputLastRow(ByVal wksInput As Excel.Worksheet) As Long
-    Const METHOD_NAME As String = "GetInputLastRow"
+Private Function GetInputLastHeaderColumn(ByVal wksInput As Excel.Worksheet) As Long
+    Const METHOD_NAME As String = "GetInputLastHeaderColumn"
     Dim errDescription As String
     Dim errNumber As Long
-    Dim lngColumn As Long
-    Dim lngColumnLastRow As Long
     Dim lngResult As Long
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    For lngColumn = 1 To INPUT_COLUMN_COUNT
-        lngColumnLastRow = wksInput.Cells(wksInput.Rows.Count, lngColumn).End(xlUp).Row
-        If lngColumnLastRow > lngResult Then lngResult = lngColumnLastRow
-    Next lngColumn
+    lngResult = wksInput.Cells(INPUT_HEADER_ROW, wksInput.Columns.Count).End(xlToLeft).Column
 
 ExitPoint:
-    If errNumber = 0 Then GetInputLastRow = lngResult
+    If errNumber = 0 Then GetInputLastHeaderColumn = lngResult
     If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     Exit Function
 
@@ -268,10 +584,44 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
+' Parameters:    wksInput As Excel.Worksheet; lngLastColumn As Long
+' Returns:       Long
+' Description:   Finds the last populated row across all source columns under the header.
+'-------------------------------------------------------------------------------
+Private Function GetInputLastRow(ByVal wksInput As Excel.Worksheet, ByVal lngLastColumn As Long) As Long
+    Const METHOD_NAME As String = "GetInputLastRow"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumn As Long
+    Dim lngColumnLastRow As Long
+    Dim lngResult As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngColumn = 1 To lngLastColumn
+        lngColumnLastRow = wksInput.Cells(wksInput.Rows.Count, lngColumn).End(xlUp).Row
+        If lngColumnLastRow > lngResult Then lngResult = lngColumnLastRow
+    Next lngColumn
+
+ExitPoint:
+    If errNumber = 0 Then GetInputLastRow = lngResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "lastColumn", lngLastColumn)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
 ' Parameters:    ---
 ' Returns:       Variant
-' Description:   Returns the canonical A:P input headers.
+' Description:   Returns the canonical A:P input headers used in final reports.
 '-------------------------------------------------------------------------------
 Private Function GetInputHeaders() As Variant
     Const METHOD_NAME As String = "GetInputHeaders"
@@ -281,7 +631,7 @@ Private Function GetInputHeaders() As Variant
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    arrResult = Array("Account", "Accout Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal")
+    arrResult = Array("Account", "Account Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal")
 
 ExitPoint:
     If errNumber = 0 Then GetInputHeaders = arrResult
