@@ -27,9 +27,10 @@ Public Sub RunDallasCashTransactions()
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngPreviousAutomationSecurity As Long
+    Dim strInputFolder As String
     Dim strLatestFondslistePath As String
+    Dim strStageWorkspace As String
     Dim strSuccessMessage As String
-    Dim strWorkspace As String
     Dim varPreviousStatusBar As Variant
     Dim xlPreviousCalculation As XlCalculation
     Dim dtRunTimestamp As Date
@@ -53,12 +54,13 @@ Public Sub RunDallasCashTransactions()
 
     dtRunTimestamp = Now
     Call LoadConfiguration(appConfig)
-    strWorkspace = CreateRunWorkspace(dtRunTimestamp)
+    strStageWorkspace = CreateRunWorkspace(dtRunTimestamp)
+    strInputFolder = CreateInputWorkingFolder(appConfig, dtRunTimestamp, strStageWorkspace)
 
-    Application.StatusBar = "Dallas Cash Transactions: downloading Outlook attachments..."
-    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace, dictAttachmentSubjects, dictProcessedMailSubjects)
+    Application.StatusBar = "Dallas Cash Transactions: downloading Outlook attachments to daily Input folder..."
+    Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strInputFolder, dictAttachmentSubjects, dictProcessedMailSubjects)
 
-    Application.StatusBar = "Dallas Cash Transactions: merging input files..."
+    Application.StatusBar = "Dallas Cash Transactions: merging input files from disk..."
     arrCombined = MergeInputFiles(colAttachmentPaths, appConfig.InputWorksheetName, dictAttachmentSubjects)
 
     Application.StatusBar = "Dallas Cash Transactions: removing duplicate transactions..."
@@ -76,8 +78,11 @@ Public Sub RunDallasCashTransactions()
     Set colTeams = ParseSupportedTeams(appConfig.SupportedTeams)
     Set colDestinationRoots = BuildDestinationRoots(appConfig)
 
+    Application.StatusBar = "Dallas Cash Transactions: publishing source input files..."
+    Call PublishInputFilesToDailyFolders(colAttachmentPaths, colDestinationRoots, DateValue(dtRunTimestamp), strInputFolder)
+
     Application.StatusBar = "Dallas Cash Transactions: creating daily reports..."
-    Call CreateDailyReports(arrCombined, colTeams, colDestinationRoots, dtRunTimestamp, strWorkspace)
+    Call CreateDailyReports(arrCombined, colTeams, colDestinationRoots, dtRunTimestamp, strStageWorkspace)
 
     If appConfig.UpdateHistorical Then
         Application.StatusBar = "Dallas Cash Transactions: updating historical master files..."
@@ -99,7 +104,7 @@ ExitPoint:
     Set colAttachmentPaths = Nothing
 
     If errNumber = 0 Then
-        If Len(strWorkspace) > 0 Then Call DeleteFolderIfExists(strWorkspace)
+        If Len(strStageWorkspace) > 0 Then Call DeleteFolderIfExists(strStageWorkspace)
     End If
 
     If blnStateCaptured Then
@@ -122,7 +127,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "workspace;fondslistePath", strWorkspace, strLatestFondslistePath)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "inputFolder;stageWorkspace;fondslistePath", strInputFolder, strStageWorkspace, strLatestFondslistePath)
     GoTo ExitPoint
 End Sub
 
