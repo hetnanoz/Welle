@@ -36,6 +36,7 @@ Public Const AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
 
 Public Const REPORT_COMBINED_PREFIX As String = "Dallas_Transactions_All_Teams_Combined_"
 Public Const REPORT_TEAM_PREFIX As String = "Dallas_Transactions_Team_"
+Public Const REPORT_UNKNOWN_PREFIX As String = "Unknown Transactions_"
 Public Const HISTORICAL_COMBINED_FILE As String = "Master_Historical_Combined.xlsx"
 Public Const HISTORICAL_TEAM_PREFIX As String = "Master_Historical_Team_"
 
