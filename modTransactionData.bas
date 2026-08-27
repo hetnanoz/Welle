@@ -126,6 +126,63 @@ End Function
 ' Creation date: 2026-08-27
 ' Parameters:    arrData As Variant
 ' Returns:       Variant
+' Description:   Returns the header and transactions for which no fund was found.
+'-------------------------------------------------------------------------------
+Public Function FilterUnknownFundTransactions(ByRef arrData As Variant) As Variant
+    Const METHOD_NAME As String = "FilterUnknownFundTransactions"
+    Dim arrResult As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumn As Long
+    Dim lngMatchCount As Long
+    Dim lngOutputRow As Long
+    Dim lngRow As Long
+    Dim strFund As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngRow = 2 To UBound(arrData, 1)
+        strFund = Trim$(CStr(arrData(lngRow, 1)))
+        If StrComp(strFund, "UNKNOWN FUND", vbTextCompare) = 0 Then lngMatchCount = lngMatchCount + 1
+    Next lngRow
+
+    ReDim arrResult(1 To lngMatchCount + 1, 1 To OUTPUT_COLUMN_COUNT)
+
+    For lngColumn = 1 To OUTPUT_COLUMN_COUNT
+        arrResult(1, lngColumn) = arrData(1, lngColumn)
+    Next lngColumn
+
+    lngOutputRow = 1
+
+    For lngRow = 2 To UBound(arrData, 1)
+        strFund = Trim$(CStr(arrData(lngRow, 1)))
+
+        If StrComp(strFund, "UNKNOWN FUND", vbTextCompare) = 0 Then
+            lngOutputRow = lngOutputRow + 1
+
+            For lngColumn = 1 To OUTPUT_COLUMN_COUNT
+                arrResult(lngOutputRow, lngColumn) = arrData(lngRow, lngColumn)
+            Next lngColumn
+        End If
+    Next lngRow
+
+ExitPoint:
+    If errNumber = 0 Then FilterUnknownFundTransactions = arrResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;matchCount", lngRow, lngMatchCount)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrData As Variant
+' Returns:       Variant
 ' Description:   Removes duplicate current-run transactions using the historical key.
 '-------------------------------------------------------------------------------
 Public Function DeduplicateCurrentTransactions(ByRef arrData As Variant) As Variant
