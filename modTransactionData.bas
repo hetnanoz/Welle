@@ -7,7 +7,7 @@ Private Const CLASS_NAME As String = "modTransactionData"
 ' Creation date: 2026-08-26
 ' Parameters:    ---
 ' Returns:       Variant
-' Description:   Returns the canonical A:U output headers.
+' Description:   Returns the canonical A:V output headers.
 '-------------------------------------------------------------------------------
 Public Function GetOutputHeaders() As Variant
     Const METHOD_NAME As String = "GetOutputHeaders"
@@ -17,7 +17,7 @@ Public Function GetOutputHeaders() As Variant
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    arrResult = Array("MF", "Master", "VD", "TD", "Team", "Account", "Account Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal")
+    arrResult = Array("MF", "Master", "VD", "TD", "Team", "Account", "Account Name", "v/d", "t/d", "Journal", "BLZ", "Ref. 1", "Ref. 2", "Ref. 3", "Ref. 4", "Ref. 5", "Ref. 6", "EUR amount", "Amount", "CCY", "Reversal", "Added Timestamp")
 
 ExitPoint:
     If errNumber = 0 Then GetOutputHeaders = arrResult
