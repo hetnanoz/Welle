@@ -250,6 +250,7 @@ Private Sub CreateReportWorkbook(ByRef arrReport As Variant, ByVal strStagePath 
 
     Call FormatTransactionWorksheet(wksTransactions, lngLastRow)
     Call CopyStaticDataValues(wkbOutput)
+    Call ApplyWorkbookSensitivityLabel(wkbOutput)
 
     Call wkbOutput.SaveAs(Filename:=strStagePath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False, AddToMru:=False, Local:=True)
 
