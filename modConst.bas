@@ -38,6 +38,7 @@ Public Const REPORT_COMBINED_PREFIX As String = "Dallas_Transactions_All_Teams_C
 Public Const REPORT_TEAM_PREFIX As String = "Dallas_Transactions_Team_"
 Public Const REPORT_UNKNOWN_PREFIX As String = "Unknown Transactions_"
 Public Const HISTORICAL_COMBINED_FILE As String = "Master_Historical_Combined.xlsx"
+Public Const HISTORICAL_UNKNOWN_FILE As String = "Master_Historical_Unknown_Transactions.xlsx"
 Public Const HISTORICAL_TEAM_PREFIX As String = "Master_Historical_Team_"
 
 Public Const ERROR_CONFIGURATION As Long = 1101
