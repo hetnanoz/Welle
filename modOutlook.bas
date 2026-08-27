@@ -6,10 +6,10 @@ Private Const OL_MAIL_ITEM_CLASS As Long = 43
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    appConfig As TAppConfig; strWorkspace As String
 ' Returns:       Collection
-' Description:   Saves matching Excel attachments and archives processed mail.
+' Description:   Saves matching Excel attachments from messages whose subject starts with the configured prefix.
 '-------------------------------------------------------------------------------
 Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String) As Collection
     Const METHOD_NAME As String = "DownloadCashTransactionAttachments"
@@ -30,6 +30,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim objRestrictedItems As Object
     Dim objRootFolder As Object
     Dim objSourceFolder As Object
+    Dim strAttachmentFileName As String
     Dim strExtension As String
     Dim strFilter As String
     Dim strSafeFileName As String
@@ -47,7 +48,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     If StrComp(CStr(objSourceFolder.EntryID), CStr(objArchiveFolder.EntryID), vbBinaryCompare) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook source and archive folders resolve to the same folder.")
 
     Set objItems = objSourceFolder.Items
-    strFilter = BuildSubjectFilter(OUTLOOK_SUBJECT_PHRASE)
+    strFilter = BuildSubjectFilter(appConfig.OutlookSubjectPrefix)
     Set objRestrictedItems = objItems.Restrict(strFilter)
     Call objRestrictedItems.Sort("[ReceivedTime]", False)
 
@@ -57,19 +58,24 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
         If CLng(objItem.Class) = OL_MAIL_ITEM_CLASS Then
             Set objMail = objItem
 
-            If InStr(1, CStr(objMail.Subject), OUTLOOK_SUBJECT_PHRASE, vbTextCompare) > 0 Then
+            If SubjectStartsWith(CStr(objMail.Subject), appConfig.OutlookSubjectPrefix) Then
                 lngSavedForMail = 0
 
                 For lngAttachment = 1 To objMail.Attachments.Count
                     Set objAttachment = objMail.Attachments.Item(lngAttachment)
-                    strExtension = GetFileExtension(CStr(objAttachment.FileName))
+                    strAttachmentFileName = CStr(objAttachment.FileName)
+                    strExtension = GetFileExtension(strAttachmentFileName)
 
-                    If strExtension = ".xlsx" Or strExtension = ".xls" Then
-                        strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(CStr(objAttachment.FileName))
-                        strTargetPath = CombinePath(strWorkspace, strSafeFileName)
-                        Call objAttachment.SaveAsFile(strTargetPath)
-                        colAttachmentPaths.Add strTargetPath
-                        lngSavedForMail = lngSavedForMail + 1
+                    If Len(strAttachmentFileName) >= Len(appConfig.OutlookAttachmentPrefix) Then
+                        If StrComp(Left$(strAttachmentFileName, Len(appConfig.OutlookAttachmentPrefix)), appConfig.OutlookAttachmentPrefix, vbTextCompare) = 0 Then
+                            If strExtension = ".xlsx" Or strExtension = ".xls" Then
+                                strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(strAttachmentFileName)
+                                strTargetPath = CombinePath(strWorkspace, strSafeFileName)
+                                Call objAttachment.SaveAsFile(strTargetPath)
+                                colAttachmentPaths.Add strTargetPath
+                                lngSavedForMail = lngSavedForMail + 1
+                            End If
+                        End If
                     End If
 
                     Set objAttachment = Nothing
@@ -86,7 +92,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
         Set objItem = Nothing
     Next lngItem
 
-    If colAttachmentPaths.Count = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments were found in matching Outlook messages.")
+    If colAttachmentPaths.Count = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments starting with the configured OUTLOOK_ATTACHMENT_PREFIX were found in matching Outlook messages.")
 
 ExitPoint:
     Set objMovedMail = Nothing
@@ -109,7 +115,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;workspace", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, strWorkspace)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;attachmentPrefix;workspace", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookAttachmentPrefix, strWorkspace)
     GoTo ExitPoint
 End Function
 
@@ -167,17 +173,19 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    objRootFolder As Object; strFolderPath As String
 ' Returns:       Object
-' Description:   Navigates an Outlook folder path below a mailbox root.
+' Description:   Navigates an Outlook folder path and reports the exact missing segment.
 '-------------------------------------------------------------------------------
 Private Function GetFolderByPath(ByVal objRootFolder As Object, ByVal strFolderPath As String) As Object
     Const METHOD_NAME As String = "GetFolderByPath"
     Dim arrParts As Variant
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngChild As Long
     Dim lngPart As Long
+    Dim objChildFolder As Object
     Dim objCurrentFolder As Object
     Dim objNextFolder As Object
     Dim strPart As String
@@ -185,7 +193,20 @@ Private Function GetFolderByPath(ByVal objRootFolder As Object, ByVal strFolderP
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    If objRootFolder Is Nothing Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "The Outlook mailbox root is not available.")
+
     strWorkingPath = Replace$(Trim$(strFolderPath), "/", "\")
+
+    Do While Len(strWorkingPath) > 0 And Left$(strWorkingPath, 1) = "\"
+        strWorkingPath = Mid$(strWorkingPath, 2)
+    Loop
+
+    Do While Len(strWorkingPath) > 0 And Right$(strWorkingPath, 1) = "\"
+        strWorkingPath = Left$(strWorkingPath, Len(strWorkingPath) - 1)
+    Loop
+
+    If Len(strWorkingPath) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "The Outlook folder path is blank.")
+
     arrParts = Split(strWorkingPath, "\")
     Set objCurrentFolder = objRootFolder
 
@@ -193,8 +214,23 @@ Private Function GetFolderByPath(ByVal objRootFolder As Object, ByVal strFolderP
         strPart = Trim$(CStr(arrParts(lngPart)))
 
         If Len(strPart) > 0 Then
-            If StrComp(strPart, CStr(objRootFolder.Name), vbTextCompare) <> 0 Then
-                Set objNextFolder = objCurrentFolder.Folders.Item(strPart)
+            If Not (lngPart = LBound(arrParts) And StrComp(strPart, CStr(objRootFolder.Name), vbTextCompare) = 0) Then
+                Set objNextFolder = Nothing
+
+                For lngChild = 1 To objCurrentFolder.Folders.Count
+                    Set objChildFolder = objCurrentFolder.Folders.Item(lngChild)
+
+                    If StrComp(Trim$(CStr(objChildFolder.Name)), strPart, vbTextCompare) = 0 Then
+                        Set objNextFolder = objChildFolder
+                        Set objChildFolder = Nothing
+                        Exit For
+                    End If
+
+                    Set objChildFolder = Nothing
+                Next lngChild
+
+                If objNextFolder Is Nothing Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook folder segment '" & strPart & "' was not found in path '" & strFolderPath & "'. Current parent folder: '" & CStr(objCurrentFolder.Name) & "'.")
+
                 Set objCurrentFolder = objNextFolder
                 Set objNextFolder = Nothing
             End If
@@ -202,6 +238,7 @@ Private Function GetFolderByPath(ByVal objRootFolder As Object, ByVal strFolderP
     Next lngPart
 
 ExitPoint:
+    Set objChildFolder = Nothing
     Set objNextFolder = Nothing
     If errNumber = 0 Then Set GetFolderByPath = objCurrentFolder
     Set objCurrentFolder = Nothing
@@ -211,16 +248,47 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath", strFolderPath)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "folderPath;segment", strFolderPath, strPart)
     GoTo ExitPoint
 End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
+' Parameters:    strSubject As String; strPrefix As String
+' Returns:       Boolean
+' Description:   Checks whether an Outlook subject starts with the configured prefix.
+'-------------------------------------------------------------------------------
+Private Function SubjectStartsWith(ByVal strSubject As String, ByVal strPrefix As String) As Boolean
+    Const METHOD_NAME As String = "SubjectStartsWith"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim blnResult As Boolean
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Len(strSubject) >= Len(strPrefix) Then
+        blnResult = StrComp(Left$(strSubject, Len(strPrefix)), strPrefix, vbTextCompare) = 0
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then SubjectStartsWith = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "subjectPrefix", strPrefix)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
 ' Parameters:    strSubjectPhrase As String
 ' Returns:       String
-' Description:   Builds a DASL case-insensitive phrase filter for Subject.
+' Description:   Builds a DASL filter for subjects starting with the configured prefix.
 '-------------------------------------------------------------------------------
 Private Function BuildSubjectFilter(ByVal strSubjectPhrase As String) As String
     Const METHOD_NAME As String = "BuildSubjectFilter"
@@ -232,7 +300,7 @@ Private Function BuildSubjectFilter(ByVal strSubjectPhrase As String) As String
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     strEscapedPhrase = Replace$(strSubjectPhrase, "'", "''")
-    strResult = "@SQL=" & Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '%" & strEscapedPhrase & "%'"
+    strResult = "@SQL=" & Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '" & strEscapedPhrase & "%'"
 
 ExitPoint:
     If errNumber = 0 Then BuildSubjectFilter = strResult
