@@ -4,7 +4,7 @@ Private Const CLASS_NAME As String = "modMain"
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-08-26
+' Creation date: 2026-08-27
 ' Parameters:    ---
 ' Returns:       ---
 ' Description:   Runs the complete Dallas Cash Transactions process.
@@ -56,7 +56,7 @@ Public Sub RunDallasCashTransactions()
     Set colAttachmentPaths = DownloadCashTransactionAttachments(appConfig, strWorkspace)
 
     Application.StatusBar = "Dallas Cash Transactions: merging input files..."
-    arrCombined = MergeInputFiles(colAttachmentPaths)
+    arrCombined = MergeInputFiles(colAttachmentPaths, appConfig.InputWorksheetName)
 
     Application.StatusBar = "Dallas Cash Transactions: loading the latest Fondsliste..."
     strLatestFondslistePath = GetLatestFondslistePath(appConfig)
