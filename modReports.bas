@@ -97,7 +97,7 @@ End Function
 ' Creation date: 2026-08-26
 ' Parameters:    strConfiguredPath As String; colRoots As Collection; dictRoots As Object
 ' Returns:       ---
-' Description:   Adds one normalized and available output root.
+' Description:   Adds one normalized local/UNC or clean SharePoint HTTPS output root.
 '-------------------------------------------------------------------------------
 Private Sub AddDestinationRoot(ByVal strConfiguredPath As String, ByVal colRoots As Collection, ByVal dictRoots As Object)
     Const METHOD_NAME As String = "AddDestinationRoot"
@@ -108,7 +108,7 @@ Private Sub AddDestinationRoot(ByVal strConfiguredPath As String, ByVal colRoots
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    strResolvedPath = ResolveConfiguredPath(strConfiguredPath)
+    strResolvedPath = ResolveOutputPath(strConfiguredPath)
     Call EnsureFolderExists(strResolvedPath)
     strKey = NormalizeWorkbookPath(strResolvedPath)
 
