@@ -1,0 +1,54 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modSensitivityLabel"
+Private Const SENSITIVITY_LABEL_ID As String = "8ffbc0b8-e97b-47d1-beac-cb0955d66f3b"
+Private Const SENSITIVITY_SITE_ID As String = "614f9c25-bffa-42c7-86d8-964101f55fa2"
+Private Const SENSITIVITY_ASSIGNMENT_METHOD As Long = 1
+Private Const SENSITIVITY_CONTENT_BITS As Long = 2
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    wkbTarget As Excel.Workbook
+' Returns:       ---
+' Description:   Applies the configured Microsoft Sensitivity Label before save.
+'-------------------------------------------------------------------------------
+Public Sub ApplyWorkbookSensitivityLabel(ByVal wkbTarget As Excel.Workbook)
+    Const METHOD_NAME As String = "ApplyWorkbookSensitivityLabel"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objLabelInfo As Object
+    Dim strWorkbookName As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not wkbTarget Is Nothing Then strWorkbookName = wkbTarget.Name
+
+    If wkbTarget Is Nothing Then
+        Call VBA.Err.Raise(ERROR_OUTPUT, METHOD_NAME, "The target workbook is not available for sensitivity labeling.")
+    End If
+
+    Set objLabelInfo = wkbTarget.SensitivityLabel.CreateLabelInfo()
+    objLabelInfo.LabelId = SENSITIVITY_LABEL_ID
+    objLabelInfo.SiteId = SENSITIVITY_SITE_ID
+    objLabelInfo.AssignmentMethod = SENSITIVITY_ASSIGNMENT_METHOD
+    objLabelInfo.ContentBits = SENSITIVITY_CONTENT_BITS
+    objLabelInfo.IsEnabled = True
+
+    Call wkbTarget.SensitivityLabel.SetLabel(objLabelInfo, objLabelInfo)
+
+ExitPoint:
+    Set objLabelInfo = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "workbook", strWorkbookName)
+    GoTo ExitPoint
+End Sub
