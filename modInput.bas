@@ -1,4 +1,4 @@
-Option Explicit
+﻿Option Explicit
 
 Private Const CLASS_NAME As String = "modInput"
 
@@ -115,6 +115,7 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     Dim strAccountNumberFormat As String
     Dim strDisplayedAccount As String
     Dim varAccountNumberFormat As Variant
+    Dim wkbAlreadyOpen As Excel.Workbook
     Dim wkbInput As Excel.Workbook
     Dim wksCandidate As Excel.Worksheet
     Dim wksInput As Excel.Worksheet
@@ -124,9 +125,16 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     arrData = Empty
     lngDataRows = 0
 
-    Set wkbInput = Application.Workbooks.Open(Filename:=strFilePath, UpdateLinks:=0, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
-    blnCloseRequired = True
+    Set wkbAlreadyOpen = GetOpenWorkbookByFullName(strFilePath, False)
 
+    If wkbAlreadyOpen Is Nothing Then
+        Set wkbInput = Application.Workbooks.Open(Filename:=strFilePath, UpdateLinks:=0, ReadOnly:=True, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
+        blnCloseRequired = True
+    Else
+        Set wkbInput = wkbAlreadyOpen
+    End If
+
+    If wkbInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook could not be opened or reused: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
     If wkbInput.Worksheets.Count = 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook does not contain a worksheet. Outlook mail subject: '" & strMailSubject & "'.")
 
     For Each wksCandidate In wkbInput.Worksheets
@@ -209,10 +217,11 @@ ExitPoint:
     Set dictColumnMap = Nothing
     Set wksCandidate = Nothing
     Set wksInput = Nothing
+    Set wkbAlreadyOpen = Nothing
 
     If blnCloseRequired Then
         blnCloseRequired = False
-        Call wkbInput.Close(SaveChanges:=False)
+        If Not wkbInput Is Nothing Then Call wkbInput.Close(SaveChanges:=False)
     End If
 
     Set wkbInput = Nothing
