@@ -19,7 +19,6 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim lngAttachment As Long
     Dim lngItem As Long
     Dim lngSavedForMail As Long
-    Dim objArchiveFolder As Object
     Dim objAttachment As Object
     Dim objItem As Object
     Dim objItems As Object
@@ -34,6 +33,8 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim strExtension As String
     Dim strFilter As String
     Dim strSafeFileName As String
+    Dim strSourceFolderEntryId As String
+    Dim strSourceStoreId As String
     Dim strTargetPath As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -47,15 +48,12 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Set objNamespace = objOutlook.GetNamespace("MAPI")
     Set objRootFolder = GetMailboxRootFolder(objNamespace, appConfig.OutlookMailbox)
     Set objSourceFolder = GetFolderByPath(objRootFolder, appConfig.OutlookSourceFolder)
-    Set objArchiveFolder = GetFolderByPath(objRootFolder, appConfig.OutlookArchiveFolder)
-
-    If StrComp(CStr(objSourceFolder.EntryID), CStr(objArchiveFolder.EntryID), vbBinaryCompare) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook source and archive folders resolve to the same folder.")
+    strSourceStoreId = CStr(objSourceFolder.StoreID)
+    strSourceFolderEntryId = CStr(objSourceFolder.EntryID)
 
     Set objItems = objSourceFolder.Items
     strFilter = BuildSubjectFilter(appConfig.OutlookSubjectPrefix)
     Set objRestrictedItems = objItems.Restrict(strFilter)
-    Call objRestrictedItems.Sort("[ReceivedTime]", False)
-
     For lngItem = objRestrictedItems.Count To 1 Step -1
         Set objItem = objRestrictedItems.Item(lngItem)
 
@@ -88,7 +86,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
                 Next lngAttachment
 
                 If lngSavedForMail > 0 Then
-                    dictProcessedMailSubjects(CStr(objMail.EntryID)) = strCurrentMailSubject
+                    dictProcessedMailSubjects(CStr(objMail.EntryID)) = Array(strCurrentMailSubject, strSourceStoreId, strSourceFolderEntryId)
                 End If
             End If
         End If
@@ -105,7 +103,6 @@ ExitPoint:
     Set objItem = Nothing
     Set objRestrictedItems = Nothing
     Set objItems = Nothing
-    Set objArchiveFolder = Nothing
     Set objSourceFolder = Nothing
     Set objRootFolder = Nothing
     Set objNamespace = Nothing
@@ -133,6 +130,7 @@ End Function
 Public Sub ArchiveProcessedOutlookMessages(ByRef appConfig As TAppConfig, ByVal dictProcessedMailSubjects As Object)
     Const METHOD_NAME As String = "ArchiveProcessedOutlookMessages"
     Dim arrEntryIds As Variant
+    Dim arrMailInfo As Variant
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngItem As Long
@@ -142,9 +140,9 @@ Public Sub ArchiveProcessedOutlookMessages(ByRef appConfig As TAppConfig, ByVal 
     Dim objNamespace As Object
     Dim objOutlook As Object
     Dim objRootFolder As Object
-    Dim objSourceFolder As Object
     Dim strCurrentEntryId As String
     Dim strCurrentMailSubject As String
+    Dim strSourceFolderEntryId As String
     Dim strSourceStoreId As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -155,17 +153,18 @@ Public Sub ArchiveProcessedOutlookMessages(ByRef appConfig As TAppConfig, ByVal 
     Set objOutlook = CreateObject("Outlook.Application")
     Set objNamespace = objOutlook.GetNamespace("MAPI")
     Set objRootFolder = GetMailboxRootFolder(objNamespace, appConfig.OutlookMailbox)
-    Set objSourceFolder = GetFolderByPath(objRootFolder, appConfig.OutlookSourceFolder)
     Set objArchiveFolder = GetFolderByPath(objRootFolder, appConfig.OutlookArchiveFolder)
-
-    If StrComp(CStr(objSourceFolder.EntryID), CStr(objArchiveFolder.EntryID), vbBinaryCompare) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook source and archive folders resolve to the same folder.")
-
-    strSourceStoreId = CStr(objSourceFolder.StoreID)
     arrEntryIds = dictProcessedMailSubjects.Keys
 
     For lngItem = LBound(arrEntryIds) To UBound(arrEntryIds)
         strCurrentEntryId = CStr(arrEntryIds(lngItem))
-        strCurrentMailSubject = CStr(dictProcessedMailSubjects(strCurrentEntryId))
+        arrMailInfo = dictProcessedMailSubjects(strCurrentEntryId)
+        strCurrentMailSubject = CStr(arrMailInfo(0))
+        strSourceStoreId = CStr(arrMailInfo(1))
+        strSourceFolderEntryId = CStr(arrMailInfo(2))
+
+        If StrComp(strSourceFolderEntryId, CStr(objArchiveFolder.EntryID), vbBinaryCompare) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook source and archive folders resolve to the same folder.")
+
         Set objItem = objNamespace.GetItemFromID(strCurrentEntryId, strSourceStoreId)
 
         If objItem Is Nothing Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "A processed Outlook message could not be reopened for archiving. Subject: '" & strCurrentMailSubject & "'.")
@@ -180,7 +179,6 @@ ExitPoint:
     Set objMovedMail = Nothing
     Set objItem = Nothing
     Set objArchiveFolder = Nothing
-    Set objSourceFolder = Nothing
     Set objRootFolder = Nothing
     Set objNamespace = Nothing
     Set objOutlook = Nothing
