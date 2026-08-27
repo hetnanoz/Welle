@@ -42,6 +42,13 @@ Public Sub RunDallasCashTransactions()
     blnPreviousDisplayAlerts = Application.DisplayAlerts
     xlPreviousCalculation = Application.Calculation
     varPreviousStatusBar = Application.StatusBar
+
+    If VarType(varPreviousStatusBar) = vbString Then
+        If InStr(1, CStr(varPreviousStatusBar), "Dallas Cash Transactions:", vbTextCompare) = 1 Then
+            varPreviousStatusBar = False
+        End If
+    End If
+
     lngPreviousAutomationSecurity = Application.AutomationSecurity
     blnStateCaptured = True
 
