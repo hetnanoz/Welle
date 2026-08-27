@@ -73,8 +73,10 @@ Public Function BuildAccountMappingDictionary() As Object
     Dim errNumber As Long
     Dim lngLastRow As Long
     Dim lngRow As Long
+    Dim strDisplayedIdentifier As String
     Dim strFund As String
     Dim strIdentifier As String
+    Dim strIdentifierContext As String
     Dim strMaster As String
     Dim strTeam As String
     Dim wksStatic As Excel.Worksheet
@@ -91,7 +93,9 @@ Public Function BuildAccountMappingDictionary() As Object
     dictAccounts.CompareMode = vbTextCompare
 
     For lngRow = 1 To UBound(arrData, 1)
-        strIdentifier = NormalizeLookupKey(arrData(lngRow, 1))
+        strDisplayedIdentifier = CStr(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW + lngRow - 1, 2).Text)
+        strIdentifierContext = "Static_Data row " & CStr(STATIC_DATA_FIRST_DATA_ROW + lngRow - 1) & "."
+        strIdentifier = NormalizeAccountIdentifier(arrData(lngRow, 1), strDisplayedIdentifier, ERROR_STATIC_DATA, strIdentifierContext)
 
         If Len(strIdentifier) > 0 Then
             strFund = GetTextValue(arrData(lngRow, 2))
