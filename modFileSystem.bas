@@ -77,7 +77,7 @@ End Function
 ' Creation date: 2026-08-27
 ' Parameters:    strPath As String
 ' Returns:       String
-' Description:   Resolves output paths while preserving clean SharePoint HTTPS URLs.
+' Description:   Resolves local outputs normally and SharePoint URLs to the current user's local OneDrive sync path.
 '-------------------------------------------------------------------------------
 Public Function ResolveOutputPath(ByVal strPath As String) As String
     Const METHOD_NAME As String = "ResolveOutputPath"
@@ -88,7 +88,7 @@ Public Function ResolveOutputPath(ByVal strPath As String) As String
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     If IsHttpPath(strPath) Then
-        strResult = NormalizeHttpUrl(strPath)
+        strResult = ResolveSharePointSyncedFolder(strPath)
     Else
         strResult = ResolveConfiguredPath(strPath)
     End If
@@ -102,6 +102,418 @@ ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strSharePointUrl As String
+' Returns:       String
+' Description:   Resolves a SharePoint folder URL to a local OneDrive shortcut or synchronized-library folder for the current user.
+'-------------------------------------------------------------------------------
+Private Function ResolveSharePointSyncedFolder(ByVal strSharePointUrl As String) As String
+    Const METHOD_NAME As String = "ResolveSharePointSyncedFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strCandidate As String
+    Dim strOneDriveRoot As String
+    Dim strOrganizationRoot As String
+    Dim strRelativePath As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strOneDriveRoot = Trim$(Environ$("OneDriveCommercial"))
+    If Len(strOneDriveRoot) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Corporate OneDrive could not be detected. Sign in to the corporate OneDrive client and try again.")
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    If Not objFileSystem.FolderExists(strOneDriveRoot) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The detected corporate OneDrive folder does not exist: " & strOneDriveRoot)
+
+    strRelativePath = ExtractSharePointRelativePath(strSharePointUrl)
+    If Len(strRelativePath) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The SharePoint folder path could not be extracted from the configured URL.")
+
+    strCandidate = CombinePath(strOneDriveRoot, strRelativePath)
+    If objFileSystem.FolderExists(strCandidate) Then
+        strResult = strCandidate
+        GoTo ExitPoint
+    End If
+
+    strCandidate = CombinePath(strOneDriveRoot, GetLastPathPart(strRelativePath))
+    If objFileSystem.FolderExists(strCandidate) Then
+        strResult = strCandidate
+        GoTo ExitPoint
+    End If
+
+    strOrganizationRoot = GetOrganizationSyncRoot(strOneDriveRoot)
+    If Len(strOrganizationRoot) > 0 Then
+        strResult = FindSyncedLibraryFolder(strOrganizationRoot, strRelativePath)
+        If Len(strResult) > 0 Then GoTo ExitPoint
+    End If
+
+    Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The SharePoint folder is not available locally for the current user. Add the target SharePoint folder using 'Add shortcut to My files' or synchronize the library with OneDrive, then run the macro again. SharePoint URL: " & strSharePointUrl & ". Corporate OneDrive: " & strOneDriveRoot & ". Expected SharePoint-relative path: " & strRelativePath)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then ResolveSharePointSyncedFolder = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sharePointUrl;oneDriveRoot;relativePath", strSharePointUrl, strOneDriveRoot, strRelativePath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strSharePointUrl As String
+' Returns:       String
+' Description:   Extracts the path below the SharePoint document library from a clean, sharing, or AllItems URL.
+'-------------------------------------------------------------------------------
+Private Function ExtractSharePointRelativePath(ByVal strSharePointUrl As String) As String
+    Const METHOD_NAME As String = "ExtractSharePointRelativePath"
+    Dim arrParts As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngIndex As Long
+    Dim lngPathPosition As Long
+    Dim lngSchemePosition As Long
+    Dim strDecodedPath As String
+    Dim strIdValue As String
+    Dim strResult As String
+    Dim strUrl As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strUrl = Trim$(strSharePointUrl)
+    If Not IsHttpPath(strUrl) Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The configured SharePoint value must be an HTTP or HTTPS URL.")
+
+    strIdValue = GetUrlQueryValue(strUrl, "id")
+
+    If Len(strIdValue) > 0 Then
+        strDecodedPath = DecodeSharePointUrlValue(strIdValue)
+    Else
+        lngSchemePosition = InStr(1, strUrl, "://", vbBinaryCompare)
+        lngPathPosition = InStr(lngSchemePosition + 3, strUrl, "/", vbBinaryCompare)
+
+        If lngPathPosition = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The SharePoint URL does not contain a folder path.")
+
+        strDecodedPath = Mid$(strUrl, lngPathPosition + 1)
+        lngPathPosition = InStr(1, strDecodedPath, "?", vbBinaryCompare)
+        If lngPathPosition > 0 Then strDecodedPath = Left$(strDecodedPath, lngPathPosition - 1)
+        lngPathPosition = InStr(1, strDecodedPath, "#", vbBinaryCompare)
+        If lngPathPosition > 0 Then strDecodedPath = Left$(strDecodedPath, lngPathPosition - 1)
+        strDecodedPath = DecodeSharePointUrlValue(strDecodedPath)
+    End If
+
+    strDecodedPath = Replace$(strDecodedPath, "/", "\")
+
+    Do While Len(strDecodedPath) > 0 And Left$(strDecodedPath, 1) = "\"
+        strDecodedPath = Mid$(strDecodedPath, 2)
+    Loop
+
+    arrParts = Split(strDecodedPath, "\")
+
+    For lngIndex = LBound(arrParts) To UBound(arrParts)
+        If StrComp(CStr(arrParts(lngIndex)), "Shared Documents", vbTextCompare) = 0 Then
+            strResult = JoinPathParts(arrParts, lngIndex + 1)
+            Exit For
+        End If
+    Next lngIndex
+
+    If Len(strResult) = 0 Then
+        For lngIndex = LBound(arrParts) To UBound(arrParts)
+            If StrComp(CStr(arrParts(lngIndex)), "Documents", vbTextCompare) = 0 Then
+                strResult = JoinPathParts(arrParts, lngIndex + 1)
+                Exit For
+            End If
+        Next lngIndex
+    End If
+
+    If Len(strResult) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "The URL path does not contain a recognizable SharePoint document library segment such as 'Shared Documents'.")
+
+ExitPoint:
+    If errNumber = 0 Then ExtractSharePointRelativePath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sharePointUrl", strSharePointUrl)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strUrl As String; strParameterName As String
+' Returns:       String
+' Description:   Returns one raw URL query parameter value without using external libraries.
+'-------------------------------------------------------------------------------
+Private Function GetUrlQueryValue(ByVal strUrl As String, ByVal strParameterName As String) As String
+    Const METHOD_NAME As String = "GetUrlQueryValue"
+    Dim arrPairs As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngEqualsPosition As Long
+    Dim lngPair As Long
+    Dim lngQueryPosition As Long
+    Dim strKey As String
+    Dim strPair As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngQueryPosition = InStr(1, strUrl, "?", vbBinaryCompare)
+    If lngQueryPosition = 0 Then GoTo ExitPoint
+
+    arrPairs = Split(Mid$(strUrl, lngQueryPosition + 1), "&")
+
+    For lngPair = LBound(arrPairs) To UBound(arrPairs)
+        strPair = CStr(arrPairs(lngPair))
+        lngEqualsPosition = InStr(1, strPair, "=", vbBinaryCompare)
+
+        If lngEqualsPosition > 0 Then
+            strKey = Left$(strPair, lngEqualsPosition - 1)
+
+            If StrComp(strKey, strParameterName, vbTextCompare) = 0 Then
+                strResult = Mid$(strPair, lngEqualsPosition + 1)
+                Exit For
+            End If
+        End If
+    Next lngPair
+
+ExitPoint:
+    If errNumber = 0 Then GetUrlQueryValue = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "parameterName", strParameterName)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strValue As String
+' Returns:       String
+' Description:   Decodes the URL characters needed for SharePoint folder-path resolution.
+'-------------------------------------------------------------------------------
+Private Function DecodeSharePointUrlValue(ByVal strValue As String) As String
+    Const METHOD_NAME As String = "DecodeSharePointUrlValue"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = strValue
+    strResult = Replace$(strResult, "+", " ")
+    strResult = Replace$(strResult, "%2F", "/", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%5C", "\", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%20", " ", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%23", "#", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%25", "%", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%26", "&", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%27", "'", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%28", "(", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%29", ")", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%2D", "-", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%2E", ".", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%3A", ":", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%3D", "=", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%3F", "?", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%40", "@", 1, -1, vbTextCompare)
+    strResult = Replace$(strResult, "%5F", "_", 1, -1, vbTextCompare)
+
+ExitPoint:
+    If errNumber = 0 Then DecodeSharePointUrlValue = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    arrParts As Variant; lngStartIndex As Long
+' Returns:       String
+' Description:   Joins path-array elements using a Windows path separator.
+'-------------------------------------------------------------------------------
+Private Function JoinPathParts(ByVal arrParts As Variant, ByVal lngStartIndex As Long) As String
+    Const METHOD_NAME As String = "JoinPathParts"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngIndex As Long
+    Dim strPart As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If lngStartIndex > UBound(arrParts) Then GoTo ExitPoint
+
+    For lngIndex = lngStartIndex To UBound(arrParts)
+        strPart = Trim$(CStr(arrParts(lngIndex)))
+
+        If Len(strPart) > 0 Then
+            If Len(strResult) > 0 Then strResult = strResult & "\"
+            strResult = strResult & strPart
+        End If
+    Next lngIndex
+
+ExitPoint:
+    If errNumber = 0 Then JoinPathParts = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "startIndex", lngStartIndex)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Returns the final folder name from a Windows-style path.
+'-------------------------------------------------------------------------------
+Private Function GetLastPathPart(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "GetLastPathPart"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngPosition As Long
+    Dim strResult As String
+    Dim strWorking As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strWorking = NormalizeBackslashes(strPath)
+
+    Do While Len(strWorking) > 0 And Right$(strWorking, 1) = "\"
+        strWorking = Left$(strWorking, Len(strWorking) - 1)
+    Loop
+
+    lngPosition = InStrRev(strWorking, "\")
+
+    If lngPosition > 0 Then
+        strResult = Mid$(strWorking, lngPosition + 1)
+    Else
+        strResult = strWorking
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetLastPathPart = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strOneDriveRoot As String
+' Returns:       String
+' Description:   Derives the organization-level SharePoint sync root from the corporate OneDrive root when available.
+'-------------------------------------------------------------------------------
+Private Function GetOrganizationSyncRoot(ByVal strOneDriveRoot As String) As String
+    Const METHOD_NAME As String = "GetOrganizationSyncRoot"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strFolderName As String
+    Dim strOrganizationName As String
+    Dim strResult As String
+    Dim strUserProfile As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    strFolderName = objFileSystem.GetFileName(strOneDriveRoot)
+
+    If StrComp(Left$(strFolderName, 11), "OneDrive - ", vbTextCompare) <> 0 Then GoTo ExitPoint
+
+    strOrganizationName = Mid$(strFolderName, 12)
+    strUserProfile = Trim$(Environ$("USERPROFILE"))
+    If Len(strUserProfile) = 0 Then GoTo ExitPoint
+
+    strResult = CombinePath(strUserProfile, strOrganizationName)
+    If Not objFileSystem.FolderExists(strResult) Then strResult = vbNullString
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then GetOrganizationSyncRoot = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "oneDriveRoot", strOneDriveRoot)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    strOrganizationRoot As String; strRelativePath As String
+' Returns:       String
+' Description:   Searches synchronized SharePoint libraries one level below the organization sync root.
+'-------------------------------------------------------------------------------
+Private Function FindSyncedLibraryFolder(ByVal strOrganizationRoot As String, ByVal strRelativePath As String) As String
+    Const METHOD_NAME As String = "FindSyncedLibraryFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim objLibraryFolder As Object
+    Dim strCandidate As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    If Not objFileSystem.FolderExists(strOrganizationRoot) Then GoTo ExitPoint
+
+    For Each objLibraryFolder In objFileSystem.GetFolder(strOrganizationRoot).SubFolders
+        strCandidate = CombinePath(CStr(objLibraryFolder.Path), strRelativePath)
+
+        If objFileSystem.FolderExists(strCandidate) Then
+            strResult = strCandidate
+            Exit For
+        End If
+    Next objLibraryFolder
+
+ExitPoint:
+    Set objLibraryFolder = Nothing
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then FindSyncedLibraryFolder = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "organizationRoot;relativePath", strOrganizationRoot, strRelativePath)
     GoTo ExitPoint
 End Function
 
