@@ -7,11 +7,11 @@ Private Const OL_MAIL_ITEM_CLASS As Long = 43
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    appConfig As TAppConfig; strWorkspace As String
+' Parameters:    appConfig As TAppConfig; strWorkspace As String; dictAttachmentSubjects As Object
 ' Returns:       Collection
-' Description:   Saves matching Excel attachments after normalizing standard Outlook subject prefixes and tags.
+' Description:   Saves matching Excel attachments and maps each saved file to its Outlook mail subject.
 '-------------------------------------------------------------------------------
-Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String) As Collection
+Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String, ByRef dictAttachmentSubjects As Object) As Collection
     Const METHOD_NAME As String = "DownloadCashTransactionAttachments"
     Dim colAttachmentPaths As Collection
     Dim errDescription As String
@@ -31,6 +31,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim objRootFolder As Object
     Dim objSourceFolder As Object
     Dim strAttachmentFileName As String
+    Dim strCurrentMailSubject As String
     Dim strExtension As String
     Dim strFilter As String
     Dim strSafeFileName As String
@@ -39,6 +40,8 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set colAttachmentPaths = New Collection
+    Set dictAttachmentSubjects = CreateObject("Scripting.Dictionary")
+    dictAttachmentSubjects.CompareMode = vbTextCompare
     Set objOutlook = CreateObject("Outlook.Application")
     Set objNamespace = objOutlook.GetNamespace("MAPI")
     Set objRootFolder = GetMailboxRootFolder(objNamespace, appConfig.OutlookMailbox)
@@ -57,8 +60,9 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
 
         If CLng(objItem.Class) = OL_MAIL_ITEM_CLASS Then
             Set objMail = objItem
+            strCurrentMailSubject = CStr(objMail.Subject)
 
-            If SubjectContainsConfiguredPhrase(CStr(objMail.Subject), appConfig.OutlookSubjectPrefix) Then
+            If SubjectContainsConfiguredPhrase(strCurrentMailSubject, appConfig.OutlookSubjectPrefix) Then
                 lngSavedForMail = 0
 
                 For lngAttachment = 1 To objMail.Attachments.Count
@@ -73,6 +77,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
                                 strTargetPath = CombinePath(strWorkspace, strSafeFileName)
                                 Call objAttachment.SaveAsFile(strTargetPath)
                                 colAttachmentPaths.Add strTargetPath
+                                dictAttachmentSubjects(strTargetPath) = strCurrentMailSubject
                                 lngSavedForMail = lngSavedForMail + 1
                             End If
                         End If
@@ -115,7 +120,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;attachmentPrefix;workspace", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookAttachmentPrefix, strWorkspace)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;attachmentPrefix;workspace;currentMailSubject", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookAttachmentPrefix, strWorkspace, strCurrentMailSubject)
     GoTo ExitPoint
 End Function
 
