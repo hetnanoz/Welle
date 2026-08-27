@@ -7,11 +7,12 @@ Private Const CLASS_NAME As String = "modHistorical"
 ' Creation date: 2026-08-26
 ' Parameters:    arrCombined As Variant; colTeams As Collection; colDestinationRoots As Collection
 ' Returns:       ---
-' Description:   Updates combined and per-team historical master workbooks.
+' Description:   Updates combined, unknown-fund, and per-team historical master workbooks.
 '-------------------------------------------------------------------------------
 Public Sub UpdateHistoricalFiles(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal colDestinationRoots As Collection)
     Const METHOD_NAME As String = "UpdateHistoricalFiles"
     Dim arrTeamData As Variant
+    Dim arrUnknownData As Variant
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngRoot As Long
@@ -30,6 +31,18 @@ Public Sub UpdateHistoricalFiles(ByRef arrCombined As Variant, ByVal colTeams As
             Call UpdateHistoricalWorkbook(strHistoricalPath, arrCombined)
         Next lngRoot
     End If
+
+    arrUnknownData = FilterUnknownFundTransactions(arrCombined)
+
+    If UBound(arrUnknownData, 1) > 1 Then
+        For lngRoot = 1 To colDestinationRoots.Count
+            strRootPath = CStr(colDestinationRoots(lngRoot))
+            strHistoricalPath = CombinePath(strRootPath, HISTORICAL_UNKNOWN_FILE)
+            Call UpdateHistoricalWorkbook(strHistoricalPath, arrUnknownData)
+        Next lngRoot
+    End If
+
+    arrUnknownData = Empty
 
     For lngTeam = 1 To colTeams.Count
         strTeam = CStr(colTeams(lngTeam))
