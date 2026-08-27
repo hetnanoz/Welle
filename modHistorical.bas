@@ -71,6 +71,7 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     Dim arrInclude() As Boolean
     Dim arrNewRows As Variant
     Dim blnCloseRequired As Boolean
+    Dim blnHeaderUpgraded As Boolean
     Dim blnNewWorkbook As Boolean
     Dim dictKeys As Object
     Dim errDescription As String
@@ -114,11 +115,12 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     If blnNewWorkbook Then
         Call InitializeHistoricalHeader(wksHistory)
     Else
-        Call ValidateHistoricalHeader(wksHistory, strHistoricalPath)
+        Call ValidateHistoricalHeader(wksHistory, strHistoricalPath, blnHeaderUpgraded)
     End If
 
     wksHistory.Columns("C:D").NumberFormat = "dd.mm.yyyy"
     wksHistory.Columns("H:I").NumberFormat = "dd.mm.yyyy"
+    wksHistory.Columns("V:V").NumberFormat = OUTPUT_TIMESTAMP_NUMBER_FORMAT
 
     lngExistingLastRow = wksHistory.Cells(wksHistory.Rows.Count, 6).End(xlUp).Row
     If lngExistingLastRow < 1 Then lngExistingLastRow = 1
@@ -169,7 +171,7 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     If blnNewWorkbook Then
         Call ApplyWorkbookSensitivityLabel(wkbHistory)
         Call wkbHistory.SaveAs(Filename:=strHistoricalPath, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False, AddToMru:=False, Local:=True)
-    ElseIf lngNewCount > 0 Then
+    ElseIf lngNewCount > 0 Or blnHeaderUpgraded Then
         Call ApplyWorkbookSensitivityLabel(wkbHistory)
         Call wkbHistory.Save
     End If
@@ -274,6 +276,7 @@ Private Sub InitializeHistoricalHeader(ByVal wksHistory As Excel.Worksheet)
     wksHistory.Columns("C:D").NumberFormat = "dd.mm.yyyy"
     wksHistory.Columns("H:I").NumberFormat = "dd.mm.yyyy"
     wksHistory.Columns("R:S").NumberFormat = "#,##0.00"
+    wksHistory.Columns("V:V").NumberFormat = OUTPUT_TIMESTAMP_NUMBER_FORMAT
 
 ExitPoint:
     If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -289,11 +292,11 @@ End Sub
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-26
-' Parameters:    wksHistory As Excel.Worksheet; strHistoricalPath As String
+' Parameters:    wksHistory As Excel.Worksheet; strHistoricalPath As String; blnHeaderUpgraded As Boolean
 ' Returns:       ---
-' Description:   Validates the A:U header before historical append operations.
+' Description:   Validates the historical header and upgrades legacy A:U files with the timestamp column.
 '-------------------------------------------------------------------------------
-Private Sub ValidateHistoricalHeader(ByVal wksHistory As Excel.Worksheet, ByVal strHistoricalPath As String)
+Private Sub ValidateHistoricalHeader(ByVal wksHistory As Excel.Worksheet, ByVal strHistoricalPath As String, ByRef blnHeaderUpgraded As Boolean)
     Const METHOD_NAME As String = "ValidateHistoricalHeader"
     Dim arrHeaders As Variant
     Dim errDescription As String
@@ -305,13 +308,24 @@ Private Sub ValidateHistoricalHeader(ByVal wksHistory As Excel.Worksheet, ByVal 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     arrHeaders = GetOutputHeaders()
+    blnHeaderUpgraded = False
 
-    For lngColumn = 1 To OUTPUT_COLUMN_COUNT
+    For lngColumn = 1 To OUTPUT_TIMESTAMP_COLUMN - 1
         strActual = Trim$(CStr(wksHistory.Cells(1, lngColumn).Value2))
         strExpected = CStr(arrHeaders(lngColumn - 1))
 
         If StrComp(strActual, strExpected, vbTextCompare) <> 0 Then Call VBA.Err.Raise(ERROR_HISTORICAL, METHOD_NAME, "Historical header mismatch in column " & CStr(lngColumn) & ". Expected '" & strExpected & "' and found '" & strActual & "'.")
     Next lngColumn
+
+    strActual = Trim$(CStr(wksHistory.Cells(1, OUTPUT_TIMESTAMP_COLUMN).Value2))
+    strExpected = CStr(arrHeaders(OUTPUT_TIMESTAMP_COLUMN - 1))
+
+    If Len(strActual) = 0 Then
+        wksHistory.Cells(1, OUTPUT_TIMESTAMP_COLUMN).Value2 = strExpected
+        blnHeaderUpgraded = True
+    ElseIf StrComp(strActual, strExpected, vbTextCompare) <> 0 Then
+        Call VBA.Err.Raise(ERROR_HISTORICAL, METHOD_NAME, "Historical header mismatch in column " & CStr(OUTPUT_TIMESTAMP_COLUMN) & ". Expected '" & strExpected & "' and found '" & strActual & "'.")
+    End If
 
 ExitPoint:
     If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
