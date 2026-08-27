@@ -85,6 +85,7 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     Dim arrNewRows As Variant
     Dim blnCloseRequired As Boolean
     Dim blnHeaderUpgraded As Boolean
+    Dim blnHttpPath As Boolean
     Dim blnNewWorkbook As Boolean
     Dim dictKeys As Object
     Dim errDescription As String
@@ -105,12 +106,16 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     lngCurrentLastRow = UBound(arrCurrent, 1)
+    blnHttpPath = IsHttpPath(strHistoricalPath)
     Set wkbAlreadyOpen = GetOpenWorkbookByFullName(strHistoricalPath, False)
 
     If Not wkbAlreadyOpen Is Nothing Then
         If wkbAlreadyOpen.ReadOnly Then Call VBA.Err.Raise(ERROR_HISTORICAL, METHOD_NAME, "Historical workbook is already open as read-only: " & strHistoricalPath)
         If Not wkbAlreadyOpen.Saved Then Call VBA.Err.Raise(ERROR_HISTORICAL, METHOD_NAME, "Historical workbook has unsaved user changes. Save or close it before running the macro: " & strHistoricalPath)
         Set wkbHistory = wkbAlreadyOpen
+    ElseIf blnHttpPath Then
+        Set wkbHistory = Application.Workbooks.Open(Filename:=strHistoricalPath, UpdateLinks:=0, ReadOnly:=False, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
+        blnCloseRequired = True
     ElseIf FileExists(strHistoricalPath) Then
         Set wkbHistory = Application.Workbooks.Open(Filename:=strHistoricalPath, UpdateLinks:=0, ReadOnly:=False, IgnoreReadOnlyRecommended:=True, AddToMru:=False, Notify:=False)
         blnCloseRequired = True
@@ -211,6 +216,11 @@ ExitPoint:
 ErrHandler:
     handlerErrNumber = VBA.Err.Number
     handlerErrDescription = VBA.Err.Description
+
+    If blnHttpPath And wkbHistory Is Nothing Then
+        handlerErrDescription = "HTTPS historical workbook could not be opened. Upload/create the historical master in the configured SharePoint root before enabling historical updates, and confirm edit permission. Path: " & strHistoricalPath & ". Original error: " & handlerErrDescription
+    End If
+
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, handlerErrNumber, handlerErrDescription, "historicalPath;currentRows;newRows", strHistoricalPath, lngCurrentLastRow, lngNewCount)
 
     If errNumber = 0 Then
