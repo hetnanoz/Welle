@@ -9,7 +9,7 @@ Private Const OL_MAIL_ITEM_CLASS As Long = 43
 ' Creation date: 2026-08-27
 ' Parameters:    appConfig As TAppConfig; strWorkspace As String
 ' Returns:       Collection
-' Description:   Saves matching Excel attachments from messages whose subject starts with the configured prefix.
+' Description:   Saves matching Excel attachments after normalizing standard Outlook subject prefixes and tags.
 '-------------------------------------------------------------------------------
 Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String) As Collection
     Const METHOD_NAME As String = "DownloadCashTransactionAttachments"
@@ -58,7 +58,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
         If CLng(objItem.Class) = OL_MAIL_ITEM_CLASS Then
             Set objMail = objItem
 
-            If SubjectStartsWith(CStr(objMail.Subject), appConfig.OutlookSubjectPrefix) Then
+            If SubjectContainsConfiguredPhrase(CStr(objMail.Subject), appConfig.OutlookSubjectPrefix) Then
                 lngSavedForMail = 0
 
                 For lngAttachment = 1 To objMail.Attachments.Count
@@ -255,31 +255,31 @@ End Function
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    strSubject As String; strPrefix As String
+' Parameters:    strSubject As String; strPhrase As String
 ' Returns:       Boolean
-' Description:   Checks whether an Outlook subject starts with the configured prefix.
+' Description:   Checks whether the configured phrase occurs anywhere in the Outlook subject.
 '-------------------------------------------------------------------------------
-Private Function SubjectStartsWith(ByVal strSubject As String, ByVal strPrefix As String) As Boolean
-    Const METHOD_NAME As String = "SubjectStartsWith"
+Private Function SubjectContainsConfiguredPhrase(ByVal strSubject As String, ByVal strPhrase As String) As Boolean
+    Const METHOD_NAME As String = "SubjectContainsConfiguredPhrase"
     Dim errDescription As String
     Dim errNumber As Long
     Dim blnResult As Boolean
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    If Len(strSubject) >= Len(strPrefix) Then
-        blnResult = StrComp(Left$(strSubject, Len(strPrefix)), strPrefix, vbTextCompare) = 0
+    If Len(Trim$(strPhrase)) > 0 Then
+        blnResult = InStr(1, strSubject, strPhrase, vbTextCompare) > 0
     End If
 
 ExitPoint:
-    If errNumber = 0 Then SubjectStartsWith = blnResult
+    If errNumber = 0 Then SubjectContainsConfiguredPhrase = blnResult
     If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     Exit Function
 
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "subjectPrefix", strPrefix)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "subjectPhrase", strPhrase)
     GoTo ExitPoint
 End Function
 
@@ -288,7 +288,7 @@ End Function
 ' Creation date: 2026-08-27
 ' Parameters:    strSubjectPhrase As String
 ' Returns:       String
-' Description:   Builds a DASL filter for subjects starting with the configured prefix.
+' Description:   Builds a DASL pre-filter for subjects containing the configured phrase.
 '-------------------------------------------------------------------------------
 Private Function BuildSubjectFilter(ByVal strSubjectPhrase As String) As String
     Const METHOD_NAME As String = "BuildSubjectFilter"
@@ -300,7 +300,7 @@ Private Function BuildSubjectFilter(ByVal strSubjectPhrase As String) As String
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     strEscapedPhrase = Replace$(strSubjectPhrase, "'", "''")
-    strResult = "@SQL=" & Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '" & strEscapedPhrase & "%'"
+    strResult = "@SQL=" & Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '%" & strEscapedPhrase & "%'"
 
 ExitPoint:
     If errNumber = 0 Then BuildSubjectFilter = strResult
