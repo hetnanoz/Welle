@@ -362,6 +362,7 @@ Private Sub FormatTransactionWorksheet(ByVal wksTransactions As Excel.Worksheet,
     wksTransactions.Columns("R:S").ColumnWidth = 15
     wksTransactions.Columns("T:U").ColumnWidth = 10
     wksTransactions.Columns("C:D").NumberFormat = "dd.mm.yyyy"
+    wksTransactions.Columns("H:I").NumberFormat = "dd.mm.yyyy"
     wksTransactions.Columns("R:S").NumberFormat = "#,##0.00"
 
 ExitPoint:
