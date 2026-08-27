@@ -7,11 +7,11 @@ Private Const OL_MAIL_ITEM_CLASS As Long = 43
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    appConfig As TAppConfig; strWorkspace As String; dictAttachmentSubjects As Object
+' Parameters:    appConfig As TAppConfig; strWorkspace As String; dictAttachmentSubjects As Object; dictProcessedMailSubjects As Object
 ' Returns:       Collection
-' Description:   Saves matching Excel attachments and maps each saved file to its Outlook mail subject.
+' Description:   Saves matching Excel attachments without moving source Outlook messages.
 '-------------------------------------------------------------------------------
-Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String, ByRef dictAttachmentSubjects As Object) As Collection
+Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String, ByRef dictAttachmentSubjects As Object, ByRef dictProcessedMailSubjects As Object) As Collection
     Const METHOD_NAME As String = "DownloadCashTransactionAttachments"
     Dim colAttachmentPaths As Collection
     Dim errDescription As String
@@ -24,7 +24,6 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim objItem As Object
     Dim objItems As Object
     Dim objMail As Object
-    Dim objMovedMail As Object
     Dim objNamespace As Object
     Dim objOutlook As Object
     Dim objRestrictedItems As Object
@@ -42,6 +41,8 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Set colAttachmentPaths = New Collection
     Set dictAttachmentSubjects = CreateObject("Scripting.Dictionary")
     dictAttachmentSubjects.CompareMode = vbTextCompare
+    Set dictProcessedMailSubjects = CreateObject("Scripting.Dictionary")
+    dictProcessedMailSubjects.CompareMode = vbBinaryCompare
     Set objOutlook = CreateObject("Outlook.Application")
     Set objNamespace = objOutlook.GetNamespace("MAPI")
     Set objRootFolder = GetMailboxRootFolder(objNamespace, appConfig.OutlookMailbox)
@@ -87,8 +88,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
                 Next lngAttachment
 
                 If lngSavedForMail > 0 Then
-                    Set objMovedMail = objMail.Move(objArchiveFolder)
-                    Set objMovedMail = Nothing
+                    dictProcessedMailSubjects(CStr(objMail.EntryID)) = strCurrentMailSubject
                 End If
             End If
         End If
@@ -100,7 +100,6 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     If colAttachmentPaths.Count = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments starting with the configured OUTLOOK_ATTACHMENT_PREFIX were found in matching Outlook messages.")
 
 ExitPoint:
-    Set objMovedMail = Nothing
     Set objAttachment = Nothing
     Set objMail = Nothing
     Set objItem = Nothing
@@ -123,6 +122,78 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;attachmentPrefix;workspace;currentMailSubject", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookAttachmentPrefix, strWorkspace, strCurrentMailSubject)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    appConfig As TAppConfig; dictProcessedMailSubjects As Object
+' Returns:       ---
+' Description:   Moves processed Outlook messages to Archive after the full run succeeds.
+'-------------------------------------------------------------------------------
+Public Sub ArchiveProcessedOutlookMessages(ByRef appConfig As TAppConfig, ByVal dictProcessedMailSubjects As Object)
+    Const METHOD_NAME As String = "ArchiveProcessedOutlookMessages"
+    Dim arrEntryIds As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngItem As Long
+    Dim objArchiveFolder As Object
+    Dim objItem As Object
+    Dim objMovedMail As Object
+    Dim objNamespace As Object
+    Dim objOutlook As Object
+    Dim objRootFolder As Object
+    Dim objSourceFolder As Object
+    Dim strCurrentEntryId As String
+    Dim strCurrentMailSubject As String
+    Dim strSourceStoreId As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If dictProcessedMailSubjects Is Nothing Then GoTo ExitPoint
+    If dictProcessedMailSubjects.Count = 0 Then GoTo ExitPoint
+
+    Set objOutlook = CreateObject("Outlook.Application")
+    Set objNamespace = objOutlook.GetNamespace("MAPI")
+    Set objRootFolder = GetMailboxRootFolder(objNamespace, appConfig.OutlookMailbox)
+    Set objSourceFolder = GetFolderByPath(objRootFolder, appConfig.OutlookSourceFolder)
+    Set objArchiveFolder = GetFolderByPath(objRootFolder, appConfig.OutlookArchiveFolder)
+
+    If StrComp(CStr(objSourceFolder.EntryID), CStr(objArchiveFolder.EntryID), vbBinaryCompare) = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "Outlook source and archive folders resolve to the same folder.")
+
+    strSourceStoreId = CStr(objSourceFolder.StoreID)
+    arrEntryIds = dictProcessedMailSubjects.Keys
+
+    For lngItem = LBound(arrEntryIds) To UBound(arrEntryIds)
+        strCurrentEntryId = CStr(arrEntryIds(lngItem))
+        strCurrentMailSubject = CStr(dictProcessedMailSubjects(strCurrentEntryId))
+        Set objItem = objNamespace.GetItemFromID(strCurrentEntryId, strSourceStoreId)
+
+        If objItem Is Nothing Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "A processed Outlook message could not be reopened for archiving. Subject: '" & strCurrentMailSubject & "'.")
+        If CLng(objItem.Class) <> OL_MAIL_ITEM_CLASS Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "A processed Outlook item is no longer a mail item. Subject: '" & strCurrentMailSubject & "'.")
+
+        Set objMovedMail = objItem.Move(objArchiveFolder)
+        Set objMovedMail = Nothing
+        Set objItem = Nothing
+    Next lngItem
+
+ExitPoint:
+    Set objMovedMail = Nothing
+    Set objItem = Nothing
+    Set objArchiveFolder = Nothing
+    Set objSourceFolder = Nothing
+    Set objRootFolder = Nothing
+    Set objNamespace = Nothing
+    Set objOutlook = Nothing
+
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;mailSubject", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, strCurrentMailSubject)
+    GoTo ExitPoint
+End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
