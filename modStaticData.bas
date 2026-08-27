@@ -93,7 +93,16 @@ Public Function BuildAccountMappingDictionary() As Object
     dictAccounts.CompareMode = vbTextCompare
 
     For lngRow = 1 To UBound(arrData, 1)
-        strDisplayedIdentifier = CStr(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW + lngRow - 1, 2).Text)
+        If IsNumeric(arrData(lngRow, 1)) Then
+            strDisplayedIdentifier = CStr(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW + lngRow - 1, 2).Text)
+        ElseIf IsError(arrData(lngRow, 1)) Then
+            strDisplayedIdentifier = vbNullString
+        ElseIf IsNull(arrData(lngRow, 1)) Or IsEmpty(arrData(lngRow, 1)) Then
+            strDisplayedIdentifier = vbNullString
+        Else
+            strDisplayedIdentifier = Trim$(CStr(arrData(lngRow, 1)))
+        End If
+
         strIdentifierContext = "Static_Data row " & CStr(STATIC_DATA_FIRST_DATA_ROW + lngRow - 1) & "."
         strIdentifier = NormalizeAccountIdentifier(arrData(lngRow, 1), strDisplayedIdentifier, ERROR_STATIC_DATA, strIdentifierContext)
 
@@ -162,8 +171,8 @@ Public Sub EnrichTransactions(ByRef arrCombined As Variant, ByVal dictAccounts A
             arrCombined(lngRow, 5) = "UNKNOWN TEAM"
         End If
 
-        arrCombined(lngRow, 3) = FormatInputDate(arrCombined(lngRow, 8))
-        arrCombined(lngRow, 4) = FormatInputDate(arrCombined(lngRow, 9))
+        arrCombined(lngRow, 3) = arrCombined(lngRow, 8)
+        arrCombined(lngRow, 4) = arrCombined(lngRow, 9)
     Next lngRow
 
 ExitPoint:
@@ -281,84 +290,3 @@ ErrHandler:
     GoTo ExitPoint
 End Function
 
-'-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-08-27
-' Parameters:    varValue As Variant
-' Returns:       String
-' Description:   Converts Excel serial dates, ISO text dates, or VBA dates.
-'-------------------------------------------------------------------------------
-Private Function FormatInputDate(ByVal varValue As Variant) As String
-    Const METHOD_NAME As String = "FormatInputDate"
-    Dim dblSerialDate As Double
-    Dim dtValue As Date
-    Dim errDescription As String
-    Dim errNumber As Long
-    Dim lngDay As Long
-    Dim lngMonth As Long
-    Dim lngYear As Long
-    Dim strResult As String
-    Dim strValue As String
-
-    If Not DEV_MODE Then On Error GoTo ErrHandler
-
-    If IsError(varValue) Then
-        Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "An Excel error value cannot be converted to a date.")
-    End If
-
-    If IsNull(varValue) Or IsEmpty(varValue) Then GoTo ExitPoint
-
-    strValue = Trim$(CStr(varValue))
-    If Len(strValue) = 0 Then GoTo ExitPoint
-
-    If IsNumeric(varValue) Then
-        dblSerialDate = CDbl(varValue)
-
-        If dblSerialDate <= 0 Or dblSerialDate > 2958465# Then
-            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid Excel serial date value: " & strValue)
-        End If
-
-        dtValue = DateSerial(1899, 12, 30) + dblSerialDate
-
-    ElseIf Len(strValue) = 10 And Mid$(strValue, 5, 1) = "-" And Mid$(strValue, 8, 1) = "-" Then
-        If Not IsNumeric(Left$(strValue, 4)) Then
-            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
-        End If
-
-        If Not IsNumeric(Mid$(strValue, 6, 2)) Then
-            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
-        End If
-
-        If Not IsNumeric(Right$(strValue, 2)) Then
-            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
-        End If
-
-        lngYear = CLng(Left$(strValue, 4))
-        lngMonth = CLng(Mid$(strValue, 6, 2))
-        lngDay = CLng(Right$(strValue, 2))
-        dtValue = DateSerial(lngYear, lngMonth, lngDay)
-
-        If Year(dtValue) <> lngYear Or Month(dtValue) <> lngMonth Or Day(dtValue) <> lngDay Then
-            Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue)
-        End If
-
-    ElseIf IsDate(varValue) Then
-        dtValue = CDate(varValue)
-
-    Else
-        Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unsupported input date value: " & strValue)
-    End If
-
-    strResult = Format$(dtValue, "dd.mm.yyyy")
-
-ExitPoint:
-    If errNumber = 0 Then FormatInputDate = strResult
-    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
-    Exit Function
-
-ErrHandler:
-    errNumber = VBA.Err.Number
-    errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "dateValue", strValue)
-    GoTo ExitPoint
-End Function
