@@ -46,6 +46,8 @@ Public Function MergeInputFiles(ByVal colAttachmentPaths As Collection, ByVal st
             If dictAttachmentSubjects.Exists(strFilePath) Then strMailSubject = CStr(dictAttachmentSubjects(strFilePath))
         End If
 
+        Application.StatusBar = "Dallas Cash Transactions: merging input file " & CStr(lngFile) & "/" & CStr(lngAttachmentCount) & " - " & GetFileNameFromPath(strFilePath)
+        DoEvents
         Call ReadInputFileData(strFilePath, strWorksheetName, strMailSubject, arrFileData, lngFileRows)
 
         If lngFileRows > 0 Then
@@ -95,12 +97,14 @@ End Function
 Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetName As String, ByVal strMailSubject As String, ByRef arrData As Variant, ByRef lngDataRows As Long)
     Const METHOD_NAME As String = "ReadInputFileData"
     Dim arrSource As Variant
+    Dim blnAccountFormatMixed As Boolean
     Dim blnCloseRequired As Boolean
     Dim dictColumnMap As Object
     Dim errDescription As String
     Dim errNumber As Long
     Dim handlerErrDescription As String
     Dim handlerErrNumber As Long
+    Dim lngAccountSourceColumn As Long
     Dim lngLastColumn As Long
     Dim lngLastRow As Long
     Dim lngOutputRow As Long
@@ -108,7 +112,9 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     Dim lngSourceRow As Long
     Dim lngTargetColumn As Long
     Dim strAccountContext As String
+    Dim strAccountNumberFormat As String
     Dim strDisplayedAccount As String
+    Dim varAccountNumberFormat As Variant
     Dim wkbInput As Excel.Workbook
     Dim wksCandidate As Excel.Worksheet
     Dim wksInput As Excel.Worksheet
@@ -142,6 +148,18 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     If Not ArrayContainsInputData(arrSource) Then GoTo ExitPoint
 
     Set dictColumnMap = BuildInputColumnMap(wksInput, lngLastColumn, strFilePath, strMailSubject)
+
+    If dictColumnMap.Exists(1) Then
+        lngAccountSourceColumn = CLng(dictColumnMap(1))
+        varAccountNumberFormat = wksInput.Range(wksInput.Cells(INPUT_FIRST_DATA_ROW, lngAccountSourceColumn), wksInput.Cells(lngLastRow, lngAccountSourceColumn)).NumberFormat
+
+        If IsNull(varAccountNumberFormat) Then
+            blnAccountFormatMixed = True
+        Else
+            strAccountNumberFormat = CStr(varAccountNumberFormat)
+        End If
+    End If
+
     lngDataRows = CountInputDataRows(arrSource, dictColumnMap)
 
     If lngDataRows = 0 Then GoTo ExitPoint
@@ -160,7 +178,11 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
                         strAccountContext = "Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'."
 
                         If IsNumeric(arrSource(lngSourceRow, lngSourceColumn)) Then
-                            strDisplayedAccount = CStr(wksInput.Cells(INPUT_FIRST_DATA_ROW + lngSourceRow - 1, lngSourceColumn).Text)
+                            strDisplayedAccount = GetFastDisplayedAccountText(arrSource(lngSourceRow, lngSourceColumn), strAccountNumberFormat)
+
+                            If blnAccountFormatMixed Then
+                                strDisplayedAccount = CStr(wksInput.Cells(INPUT_FIRST_DATA_ROW + lngSourceRow - 1, lngSourceColumn).Text)
+                            End If
                         ElseIf IsError(arrSource(lngSourceRow, lngSourceColumn)) Then
                             strDisplayedAccount = vbNullString
                         ElseIf IsNull(arrSource(lngSourceRow, lngSourceColumn)) Or IsEmpty(arrSource(lngSourceRow, lngSourceColumn)) Then
@@ -209,6 +231,57 @@ ErrHandler:
 
     GoTo ExitPoint
 End Sub
+
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    varValue As Variant; strNumberFormat As String
+' Returns:       String
+' Description:   Reconstructs leading-zero Account display text without a per-row worksheet COM call.
+'-------------------------------------------------------------------------------
+Private Function GetFastDisplayedAccountText(ByVal varValue As Variant, ByVal strNumberFormat As String) As String
+    Const METHOD_NAME As String = "GetFastDisplayedAccountText"
+    Dim blnZeroMask As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngPosition As Long
+    Dim strCharacter As String
+    Dim strFormat As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not IsNumeric(varValue) Then GoTo ExitPoint
+
+    strFormat = Trim$(strNumberFormat)
+    If Len(strFormat) = 0 Then GoTo ExitPoint
+
+    blnZeroMask = True
+
+    For lngPosition = 1 To Len(strFormat)
+        strCharacter = Mid$(strFormat, lngPosition, 1)
+
+        If strCharacter <> "0" Then
+            blnZeroMask = False
+            Exit For
+        End If
+    Next lngPosition
+
+    If blnZeroMask Then strResult = Format$(CDbl(varValue), strFormat)
+
+ExitPoint:
+    If errNumber = 0 Then GetFastDisplayedAccountText = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "numberFormat", strNumberFormat)
+    GoTo ExitPoint
+End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
