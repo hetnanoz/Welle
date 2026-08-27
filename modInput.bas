@@ -158,8 +158,21 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
 
                     If lngTargetColumn = 1 Then
                         strAccountContext = "Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'."
-                        strDisplayedAccount = CStr(wksInput.Cells(INPUT_FIRST_DATA_ROW + lngSourceRow - 1, lngSourceColumn).Text)
+
+                        If IsNumeric(arrSource(lngSourceRow, lngSourceColumn)) Then
+                            strDisplayedAccount = CStr(wksInput.Cells(INPUT_FIRST_DATA_ROW + lngSourceRow - 1, lngSourceColumn).Text)
+                        ElseIf IsError(arrSource(lngSourceRow, lngSourceColumn)) Then
+                            strDisplayedAccount = vbNullString
+                        ElseIf IsNull(arrSource(lngSourceRow, lngSourceColumn)) Or IsEmpty(arrSource(lngSourceRow, lngSourceColumn)) Then
+                            strDisplayedAccount = vbNullString
+                        Else
+                            strDisplayedAccount = Trim$(CStr(arrSource(lngSourceRow, lngSourceColumn)))
+                        End If
+
                         arrData(lngOutputRow, lngTargetColumn) = NormalizeAccountIdentifier(arrSource(lngSourceRow, lngSourceColumn), strDisplayedAccount, ERROR_INPUT_DATA, strAccountContext)
+                    ElseIf lngTargetColumn = 3 Or lngTargetColumn = 4 Then
+                        strAccountContext = "Input file: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'."
+                        arrData(lngOutputRow, lngTargetColumn) = NormalizeInputDateValue(arrSource(lngSourceRow, lngSourceColumn), strAccountContext)
                     Else
                         arrData(lngOutputRow, lngTargetColumn) = arrSource(lngSourceRow, lngSourceColumn)
                     End If
@@ -196,6 +209,78 @@ ErrHandler:
 
     GoTo ExitPoint
 End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-08-27
+' Parameters:    varValue As Variant; strContext As String
+' Returns:       Variant
+' Description:   Normalizes an input date to an Excel date serial without time.
+'-------------------------------------------------------------------------------
+Private Function NormalizeInputDateValue(ByVal varValue As Variant, ByVal strContext As String) As Variant
+    Const METHOD_NAME As String = "NormalizeInputDateValue"
+    Dim dblResult As Double
+    Dim dtValue As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngDay As Long
+    Dim lngMonth As Long
+    Dim lngYear As Long
+    Dim strValue As String
+    Dim varResult As Variant
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(varValue) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "An Excel error value cannot be converted to a date. " & strContext)
+
+    If IsNull(varValue) Or IsEmpty(varValue) Then
+        varResult = vbNullString
+        GoTo ExitPoint
+    End If
+
+    strValue = Trim$(CStr(varValue))
+
+    If Len(strValue) = 0 Then
+        varResult = vbNullString
+        GoTo ExitPoint
+    End If
+
+    If IsNumeric(varValue) Then
+        dblResult = Fix(CDbl(varValue))
+
+        If dblResult <= 0 Or dblResult > 2958465# Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid Excel serial date value: " & strValue & ". " & strContext)
+
+        varResult = dblResult
+    ElseIf Len(strValue) = 10 And Mid$(strValue, 5, 1) = "-" And Mid$(strValue, 8, 1) = "-" Then
+        If Not IsNumeric(Left$(strValue, 4)) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue & ". " & strContext)
+        If Not IsNumeric(Mid$(strValue, 6, 2)) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue & ". " & strContext)
+        If Not IsNumeric(Right$(strValue, 2)) Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue & ". " & strContext)
+
+        lngYear = CLng(Left$(strValue, 4))
+        lngMonth = CLng(Mid$(strValue, 6, 2))
+        lngDay = CLng(Right$(strValue, 2))
+        dtValue = DateSerial(lngYear, lngMonth, lngDay)
+
+        If Year(dtValue) <> lngYear Or Month(dtValue) <> lngMonth Or Day(dtValue) <> lngDay Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Invalid ISO date value: " & strValue & ". " & strContext)
+
+        varResult = CDbl(dtValue)
+    ElseIf IsDate(varValue) Then
+        varResult = CDbl(DateValue(CDate(varValue)))
+    Else
+        Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Unsupported input date value: " & strValue & ". " & strContext)
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then NormalizeInputDateValue = varResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "dateValue;context", strValue, strContext)
+    GoTo ExitPoint
+End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
