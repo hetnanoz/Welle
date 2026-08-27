@@ -361,9 +361,11 @@ Private Sub FormatTransactionWorksheet(ByVal wksTransactions As Excel.Worksheet,
     wksTransactions.Columns("J:Q").ColumnWidth = 14
     wksTransactions.Columns("R:S").ColumnWidth = 15
     wksTransactions.Columns("T:U").ColumnWidth = 10
+    wksTransactions.Columns("V:V").ColumnWidth = 16
     wksTransactions.Columns("C:D").NumberFormat = "dd.mm.yyyy"
     wksTransactions.Columns("H:I").NumberFormat = "dd.mm.yyyy"
     wksTransactions.Columns("R:S").NumberFormat = "#,##0.00"
+    wksTransactions.Columns("V:V").NumberFormat = OUTPUT_TIMESTAMP_NUMBER_FORMAT
 
 ExitPoint:
     Set rngTable = Nothing
