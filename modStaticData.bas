@@ -138,6 +138,7 @@ End Function
 Public Sub EnrichTransactions(ByRef arrCombined As Variant, ByVal dictAccounts As Object)
     Const METHOD_NAME As String = "EnrichTransactions"
     Dim arrMapping As Variant
+    Dim dtAddedTimestamp As Date
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngRow As Long
@@ -149,6 +150,8 @@ Public Sub EnrichTransactions(ByRef arrCombined As Variant, ByVal dictAccounts A
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     If dictAccounts Is Nothing Then Call VBA.Err.Raise(ERROR_STATIC_DATA, METHOD_NAME, "Account mapping dictionary is not available.")
+
+    dtAddedTimestamp = Now
 
     For lngRow = 2 To UBound(arrCombined, 1)
         strAccount = NormalizeLookupKey(arrCombined(lngRow, 6))
@@ -173,6 +176,7 @@ Public Sub EnrichTransactions(ByRef arrCombined As Variant, ByVal dictAccounts A
 
         arrCombined(lngRow, 3) = arrCombined(lngRow, 8)
         arrCombined(lngRow, 4) = arrCombined(lngRow, 9)
+        arrCombined(lngRow, OUTPUT_TIMESTAMP_COLUMN) = dtAddedTimestamp
     Next lngRow
 
 ExitPoint:
