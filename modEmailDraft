@@ -163,15 +163,19 @@ Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrComb
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngTransactionCount As Long
+    Dim lngUnknownCount As Long
     Dim strEncodedSharePoint As String
     Dim strResult As String
     Dim strSharePointHtml As String
     Dim strTeamsToken As String
     Dim strTemplate As String
+    Dim strUnknownStatus As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     lngTransactionCount = UBound(arrCombined, 1) - 1
+    lngUnknownCount = CountUnknownFundTransactions(arrCombined)
+    strUnknownStatus = BuildUnknownStatus(lngUnknownCount)
 
     If Len(strTeamList) > 0 Then
         strTeamsToken = strTeamList
@@ -188,6 +192,14 @@ Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrComb
     strTemplate = Replace$(strTemplate, "[TEAMS]", strTeamsToken)
     strTemplate = Replace$(strTemplate, "[LOCAL_FOLDER]", strLocalFolder)
     strTemplate = Replace$(strTemplate, "[TRANSACTION_COUNT]", CStr(lngTransactionCount))
+    strTemplate = Replace$(strTemplate, "[UNKNOWN_COUNT]", CStr(lngUnknownCount))
+    strTemplate = Replace$(strTemplate, "[UNKNOWN_MASTER_FILE]", HISTORICAL_UNKNOWN_FILE)
+    strTemplate = Replace$(strTemplate, "[UNKNOWN_STATUS]", strUnknownStatus)
+
+    If InStr(1, strTemplate, "[SHAREPOINT_URL]", vbTextCompare) = 0 Then
+        strTemplate = strTemplate & vbCrLf & vbCrLf & "SharePoint: [SHAREPOINT_URL]"
+    End If
+
     strTemplate = Replace$(strTemplate, "[SHAREPOINT_URL]", SHAREPOINT_PLACEHOLDER)
 
     strResult = HtmlEncode(strTemplate)
@@ -231,18 +243,18 @@ Private Function GetDefaultMailBody(ByVal blnHasTeams As Boolean) As String
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     If blnHasTeams Then
-        strResult = "Hi Teams," & vbCrLf & vbCrLf
+        strResult = "Hi All," & vbCrLf & vbCrLf
         strResult = strResult & "New Cash Transactions are available for the following teams: [TEAMS]." & vbCrLf
         strResult = strResult & "Please review and process the relevant transactions." & vbCrLf & vbCrLf
     Else
-        strResult = "Hi Teams," & vbCrLf & vbCrLf
-        strResult = strResult & "There are no new Cash Transactions for the configured teams for [RUN_DATE]." & vbCrLf
-        strResult = strResult & "No team action is required." & vbCrLf & vbCrLf
+        strResult = "Hi All," & vbCrLf & vbCrLf
+        strResult = strResult & "The daily Cash Transactions check for [RUN_DATE] has been completed." & vbCrLf
+        strResult = strResult & "No configured teams have new mapped transactions requiring action." & vbCrLf & vbCrLf
     End If
 
-    strResult = strResult & "Files location:" & vbCrLf
-    strResult = strResult & "Local: [LOCAL_FOLDER]" & vbCrLf
-    strResult = strResult & "SharePoint: [SHAREPOINT_URL]"
+    strResult = strResult & "[UNKNOWN_STATUS]" & vbCrLf & vbCrLf
+    strResult = strResult & "Files are available on SharePoint:" & vbCrLf
+    strResult = strResult & "[SHAREPOINT_URL]"
 
 ExitPoint:
     If errNumber = 0 Then GetDefaultMailBody = strResult
@@ -253,6 +265,43 @@ ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "hasTeams", blnHasTeams)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-01
+' Parameters:    lngUnknownCount As Long
+' Returns:       String
+' Description:   Builds the conditional unknown-transactions message for the email body.
+'-------------------------------------------------------------------------------
+Private Function BuildUnknownStatus(ByVal lngUnknownCount As Long) As String
+    Const METHOD_NAME As String = "BuildUnknownStatus"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If lngUnknownCount = 0 Then
+        strResult = "There are no unknown transactions requiring manual review."
+    ElseIf lngUnknownCount = 1 Then
+        strResult = "There is 1 unknown transaction requiring manual review."
+        strResult = strResult & vbCrLf & "Please check it manually in " & HISTORICAL_UNKNOWN_FILE & "."
+    Else
+        strResult = "There are " & CStr(lngUnknownCount) & " unknown transactions requiring manual review."
+        strResult = strResult & vbCrLf & "Please check them manually in " & HISTORICAL_UNKNOWN_FILE & "."
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then BuildUnknownStatus = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "unknownCount", lngUnknownCount)
     GoTo ExitPoint
 End Function
 
