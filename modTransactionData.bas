@@ -180,6 +180,43 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
+' Creation date: 2026-09-01
+' Parameters:    arrData As Variant
+' Returns:       Long
+' Description:   Counts transactions for which no fund was found.
+'-------------------------------------------------------------------------------
+Public Function CountUnknownFundTransactions(ByRef arrData As Variant) As Long
+    Const METHOD_NAME As String = "CountUnknownFundTransactions"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngCount As Long
+    Dim lngRow As Long
+    Dim strFund As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngRow = 2 To UBound(arrData, 1)
+        strFund = Trim$(CStr(arrData(lngRow, 1)))
+
+        If StrComp(strFund, "UNKNOWN FUND", vbTextCompare) = 0 Then
+            lngCount = lngCount + 1
+        End If
+    Next lngRow
+
+ExitPoint:
+    If errNumber = 0 Then CountUnknownFundTransactions = lngCount
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;fund", lngRow, strFund)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
 ' Parameters:    arrData As Variant
 ' Returns:       Variant
