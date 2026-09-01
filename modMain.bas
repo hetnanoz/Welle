@@ -166,6 +166,7 @@ Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeam
     Dim lngRow As Long
     Dim lngTeam As Long
     Dim lngTransactionCount As Long
+    Dim lngUnknownCount As Long
     Dim strOtherTeams As String
     Dim strResult As String
     Dim strTeam As String
@@ -179,6 +180,7 @@ Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeam
     dictTeamCounts.CompareMode = vbTextCompare
 
     lngTransactionCount = UBound(arrCombined, 1) - 1
+    lngUnknownCount = CountUnknownFundTransactions(arrCombined)
 
     For lngRow = 2 To UBound(arrCombined, 1)
         strTeam = Trim$(CStr(arrCombined(lngRow, 5)))
@@ -226,7 +228,8 @@ Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeam
     strResult = strResult & "Unique transactions: " & CStr(lngTransactionCount) & vbCrLf
     strResult = strResult & "Excel attachments processed: " & CStr(lngAttachmentCount) & vbCrLf
     strResult = strResult & "Outlook messages archived: " & CStr(lngMailCount) & vbCrLf
-    strResult = strResult & "Teams with trades: " & strTeamsWithTrades
+    strResult = strResult & "Teams with trades: " & strTeamsWithTrades & vbCrLf
+    strResult = strResult & "Unknown fund transactions: " & CStr(lngUnknownCount)
 
     If blnEmailRequested Then
         strResult = strResult & vbCrLf
