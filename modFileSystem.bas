@@ -20,9 +20,12 @@ Public Function ResolveConfiguredPath(ByVal strPath As String) As String
     strResult = Trim$(strPath)
     If Len(strResult) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "A configured path is blank.")
 
+    strResult = ResolveDynamicPathTokens(strResult)
+
     If IsHttpPath(strResult) Then
         strResult = ConvertHttpUrlToWebDav(strResult)
     Else
+        strResult = RebaseUserSpecificPath(strResult)
         strResult = NormalizeBackslashes(strResult)
     End If
 
@@ -41,6 +44,116 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
     GoTo ExitPoint
 End Function
+ '-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-01
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Replaces portable Mapping tokens with paths for the current Windows user.
+'-------------------------------------------------------------------------------
+Private Function ResolveDynamicPathTokens(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "ResolveDynamicPathTokens"
+    Const TOKEN_USERPROFILE As String = "[USERPROFILE]"
+    Const TOKEN_ONEDRIVE_COMMERCIAL As String = "[ONEDRIVE_COMMERCIAL]"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strOneDriveCommercial As String
+    Dim strResult As String
+    Dim strUserProfile As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = Trim$(strPath)
+    strUserProfile = Trim$(Environ$("USERPROFILE"))
+    strOneDriveCommercial = Trim$(Environ$("OneDriveCommercial"))
+
+    If InStr(1, strResult, TOKEN_USERPROFILE, vbTextCompare) > 0 Then
+        If Len(strUserProfile) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Windows USERPROFILE could not be detected for the current user.")
+        strResult = Replace$(strResult, TOKEN_USERPROFILE, strUserProfile, 1, -1, vbTextCompare)
+    End If
+
+    If InStr(1, strResult, TOKEN_ONEDRIVE_COMMERCIAL, vbTextCompare) > 0 Then
+        If Len(strOneDriveCommercial) = 0 Then Call VBA.Err.Raise(ERROR_FILE_SYSTEM, METHOD_NAME, "Corporate OneDrive could not be detected for the current user. Sign in to OneDrive and try again.")
+        strResult = Replace$(strResult, TOKEN_ONEDRIVE_COMMERCIAL, strOneDriveCommercial, 1, -1, vbTextCompare)
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then ResolveDynamicPathTokens = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-01
+' Parameters:    strPath As String
+' Returns:       String
+' Description:   Replaces a hard-coded C:\Users\<user> prefix with the current user's profile.
+'                This keeps older Mapping files portable between users.
+'-------------------------------------------------------------------------------
+Private Function RebaseUserSpecificPath(ByVal strPath As String) As String
+    Const METHOD_NAME As String = "RebaseUserSpecificPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngNextSeparator As Long
+    Dim lngUserNameStart As Long
+    Dim lngUsersMarker As Long
+    Dim strConfiguredUser As String
+    Dim strCurrentProfile As String
+    Dim strResult As String
+    Dim strSuffix As String
+    Dim strWorking As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strWorking = NormalizeBackslashes(strPath)
+    strCurrentProfile = NormalizeBackslashes(Trim$(Environ$("USERPROFILE")))
+    strResult = strWorking
+
+    If Len(strWorking) = 0 Or Len(strCurrentProfile) = 0 Then GoTo ExitPoint
+    If Len(strWorking) >= Len(strCurrentProfile) Then
+        If StrComp(Left$(strWorking, Len(strCurrentProfile)), strCurrentProfile, vbTextCompare) = 0 Then GoTo ExitPoint
+    End If
+
+    lngUsersMarker = InStr(1, strWorking, "\Users\", vbTextCompare)
+    If lngUsersMarker <> 3 Then GoTo ExitPoint
+
+    lngUserNameStart = lngUsersMarker + Len("\Users\")
+    lngNextSeparator = InStr(lngUserNameStart, strWorking, "\", vbBinaryCompare)
+
+    If lngNextSeparator > 0 Then
+        strConfiguredUser = Mid$(strWorking, lngUserNameStart, lngNextSeparator - lngUserNameStart)
+        strSuffix = Mid$(strWorking, lngNextSeparator)
+    Else
+        strConfiguredUser = Mid$(strWorking, lngUserNameStart)
+        strSuffix = vbNullString
+    End If
+
+    Select Case LCase$(Trim$(strConfiguredUser))
+        Case vbNullString, "public", "default", "default user", "all users"
+            GoTo ExitPoint
+    End Select
+
+    strResult = strCurrentProfile & strSuffix
+
+ExitPoint:
+    If errNumber = 0 Then RebaseUserSpecificPath = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
