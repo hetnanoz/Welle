@@ -8,6 +8,7 @@ Public Type TAppConfig
     OutlookSourceFolder As String
     OutlookArchiveFolder As String
     OutlookSubjectPrefix As String
+    OutlookSenderEmail As String
     OutlookAttachmentPrefix As String
     InputWorksheetName As String
     FondslisteFolder As String
@@ -25,3 +26,4 @@ Public Type TAppConfig
     MailFrom As String
     MailSharePointUrl As String
 End Type
+
