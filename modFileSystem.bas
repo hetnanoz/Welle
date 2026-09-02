@@ -204,6 +204,7 @@ Public Function ResolveOutputPath(ByVal strPath As String) As String
         strResult = ResolveSharePointSyncedFolder(strPath)
     Else
         strResult = ResolveConfiguredPath(strPath)
+        Call ValidateExistingSharePointSyncBase(strResult, strPath)
     End If
 
 ExitPoint:
@@ -215,6 +216,155 @@ ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "path", strPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    strResolvedPath As String; strConfiguredPath As String
+' Returns:       ---
+' Description:   Prevents the macro from creating a fake local SharePoint tree.
+'                Paths located below the organization SharePoint sync root must
+'                already exist before the run. Only YYYY\MM\YYYY-MM-DD and
+'                lower run folders may be created later by EnsureFolderExists.
+'-------------------------------------------------------------------------------
+Private Sub ValidateExistingSharePointSyncBase(ByVal strResolvedPath As String, ByVal strConfiguredPath As String)
+    Const METHOD_NAME As String = "ValidateExistingSharePointSyncBase"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strExpectedOrganizationRoot As String
+    Dim strNormalizedPath As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strNormalizedPath = NormalizeBackslashes(Trim$(strResolvedPath))
+    strExpectedOrganizationRoot = GetExpectedOrganizationSyncRoot()
+
+    If Len(strExpectedOrganizationRoot) = 0 Then GoTo ExitPoint
+    If Not IsSameOrChildPath(strNormalizedPath, strExpectedOrganizationRoot) Then GoTo ExitPoint
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+
+    If Not objFileSystem.FolderExists(strNormalizedPath) Then
+        Call VBA.Err.Raise( _
+            ERROR_FILE_SYSTEM, _
+            METHOD_NAME, _
+            "The configured SharePoint synchronized base folder does not exist for the current user and will NOT be created automatically: " & _
+            strNormalizedPath & ". Open the target SharePoint library in the browser, use Sync, wait until the library appears in File Explorer with OneDrive sync status, and run the macro again. Configured value: " & _
+            strConfiguredPath)
+    End If
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "configuredPath;resolvedPath;expectedOrganizationRoot", strConfiguredPath, strResolvedPath, strExpectedOrganizationRoot)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    ---
+' Returns:       String
+' Description:   Derives the expected organization-level SharePoint sync root
+'                from OneDriveCommercial without requiring the folder to exist.
+'                Example: C:\Users\h88824\OneDrive - BNP Paribas
+'                becomes C:\Users\h88824\BNP Paribas.
+'-------------------------------------------------------------------------------
+Private Function GetExpectedOrganizationSyncRoot() As String
+    Const METHOD_NAME As String = "GetExpectedOrganizationSyncRoot"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objFileSystem As Object
+    Dim strFolderName As String
+    Dim strOneDriveRoot As String
+    Dim strOrganizationName As String
+    Dim strResult As String
+    Dim strUserProfile As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strOneDriveRoot = NormalizeBackslashes(Trim$(Environ$("OneDriveCommercial")))
+    strUserProfile = NormalizeBackslashes(Trim$(Environ$("USERPROFILE")))
+
+    If Len(strOneDriveRoot) = 0 Or Len(strUserProfile) = 0 Then GoTo ExitPoint
+
+    Set objFileSystem = CreateObject("Scripting.FileSystemObject")
+    strFolderName = objFileSystem.GetFileName(strOneDriveRoot)
+
+    If Len(strFolderName) <= Len("OneDrive - ") Then GoTo ExitPoint
+    If StrComp(Left$(strFolderName, Len("OneDrive - ")), "OneDrive - ", vbTextCompare) <> 0 Then GoTo ExitPoint
+
+    strOrganizationName = Trim$(Mid$(strFolderName, Len("OneDrive - ") + 1))
+    If Len(strOrganizationName) = 0 Then GoTo ExitPoint
+
+    strResult = CombinePath(strUserProfile, strOrganizationName)
+
+ExitPoint:
+    Set objFileSystem = Nothing
+    If errNumber = 0 Then GetExpectedOrganizationSyncRoot = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    strCandidatePath As String; strParentPath As String
+' Returns:       Boolean
+' Description:   Returns True when candidate equals parent or is below it.
+'-------------------------------------------------------------------------------
+Private Function IsSameOrChildPath(ByVal strCandidatePath As String, ByVal strParentPath As String) As Boolean
+    Const METHOD_NAME As String = "IsSameOrChildPath"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strCandidate As String
+    Dim strParent As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strCandidate = NormalizeBackslashes(Trim$(strCandidatePath))
+    strParent = NormalizeBackslashes(Trim$(strParentPath))
+
+    Do While Len(strCandidate) > 3 And Right$(strCandidate, 1) = "\"
+        strCandidate = Left$(strCandidate, Len(strCandidate) - 1)
+    Loop
+
+    Do While Len(strParent) > 3 And Right$(strParent, 1) = "\"
+        strParent = Left$(strParent, Len(strParent) - 1)
+    Loop
+
+    If Len(strCandidate) < Len(strParent) Then GoTo ExitPoint
+
+    If StrComp(strCandidate, strParent, vbTextCompare) = 0 Then
+        IsSameOrChildPath = True
+    ElseIf Len(strCandidate) > Len(strParent) Then
+        IsSameOrChildPath = _
+            StrComp(Left$(strCandidate, Len(strParent)), strParent, vbTextCompare) = 0 And _
+            Mid$(strCandidate, Len(strParent) + 1, 1) = "\"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "candidatePath;parentPath", strCandidatePath, strParentPath)
     GoTo ExitPoint
 End Function
 
@@ -1550,4 +1700,5 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "sourceInputFolder;destinationInputFolder;sourceFile", strSourceInputFolder, strDestinationInputFolder, strSourceFile)
     GoTo ExitPoint
 End Sub
+
 
