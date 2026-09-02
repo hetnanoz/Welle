@@ -14,6 +14,7 @@ Private Const OL_MAIL_ITEM_CLASS As Long = 43
 Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig, ByVal strWorkspace As String, ByRef dictAttachmentSubjects As Object, ByRef dictProcessedMailSubjects As Object) As Collection
     Const METHOD_NAME As String = "DownloadCashTransactionAttachments"
     Dim colAttachmentPaths As Collection
+    Dim blnSenderMatches As Boolean
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngAttachment As Long
@@ -30,6 +31,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
     Dim objSourceFolder As Object
     Dim strAttachmentFileName As String
     Dim strCurrentMailSubject As String
+    Dim strCurrentSenderEmail As String
     Dim strExtension As String
     Dim strFilter As String
     Dim strSafeFileName As String
@@ -62,31 +64,41 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
             strCurrentMailSubject = CStr(objMail.Subject)
 
             If SubjectContainsConfiguredPhrase(strCurrentMailSubject, appConfig.OutlookSubjectPrefix) Then
-                lngSavedForMail = 0
+                blnSenderMatches = True
+                strCurrentSenderEmail = vbNullString
 
-                For lngAttachment = 1 To objMail.Attachments.Count
-                    Set objAttachment = objMail.Attachments.Item(lngAttachment)
-                    strAttachmentFileName = CStr(objAttachment.FileName)
-                    strExtension = GetFileExtension(strAttachmentFileName)
+                If Len(Trim$(appConfig.OutlookSenderEmail)) > 0 Then
+                    strCurrentSenderEmail = GetSenderSmtpAddress(objMail)
+                    blnSenderMatches = StrComp(Trim$(strCurrentSenderEmail), Trim$(appConfig.OutlookSenderEmail), vbTextCompare) = 0
+                End If
 
-                    If Len(strAttachmentFileName) >= Len(appConfig.OutlookAttachmentPrefix) Then
-                        If StrComp(Left$(strAttachmentFileName, Len(appConfig.OutlookAttachmentPrefix)), appConfig.OutlookAttachmentPrefix, vbTextCompare) = 0 Then
-                            If strExtension = ".xlsx" Or strExtension = ".xls" Then
-                                strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(strAttachmentFileName)
-                                strTargetPath = CombinePath(strWorkspace, strSafeFileName)
-                                Call objAttachment.SaveAsFile(strTargetPath)
-                                colAttachmentPaths.Add strTargetPath
-                                dictAttachmentSubjects(strTargetPath) = strCurrentMailSubject
-                                lngSavedForMail = lngSavedForMail + 1
+                If blnSenderMatches Then
+                    lngSavedForMail = 0
+
+                    For lngAttachment = 1 To objMail.Attachments.Count
+                        Set objAttachment = objMail.Attachments.Item(lngAttachment)
+                        strAttachmentFileName = CStr(objAttachment.FileName)
+                        strExtension = GetFileExtension(strAttachmentFileName)
+
+                        If Len(strAttachmentFileName) >= Len(appConfig.OutlookAttachmentPrefix) Then
+                            If StrComp(Left$(strAttachmentFileName, Len(appConfig.OutlookAttachmentPrefix)), appConfig.OutlookAttachmentPrefix, vbTextCompare) = 0 Then
+                                If strExtension = ".xlsx" Or strExtension = ".xls" Then
+                                    strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(strAttachmentFileName)
+                                    strTargetPath = CombinePath(strWorkspace, strSafeFileName)
+                                    Call objAttachment.SaveAsFile(strTargetPath)
+                                    colAttachmentPaths.Add strTargetPath
+                                    dictAttachmentSubjects(strTargetPath) = strCurrentMailSubject
+                                    lngSavedForMail = lngSavedForMail + 1
+                                End If
                             End If
                         End If
+
+                        Set objAttachment = Nothing
+                    Next lngAttachment
+
+                    If lngSavedForMail > 0 Then
+                        dictProcessedMailSubjects(CStr(objMail.EntryID)) = Array(strCurrentMailSubject, strSourceStoreId, strSourceFolderEntryId)
                     End If
-
-                    Set objAttachment = Nothing
-                Next lngAttachment
-
-                If lngSavedForMail > 0 Then
-                    dictProcessedMailSubjects(CStr(objMail.EntryID)) = Array(strCurrentMailSubject, strSourceStoreId, strSourceFolderEntryId)
                 End If
             End If
         End If
@@ -95,7 +107,13 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
         Set objItem = Nothing
     Next lngItem
 
-    If colAttachmentPaths.Count = 0 Then Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments starting with the configured OUTLOOK_ATTACHMENT_PREFIX were found in matching Outlook messages.")
+    If colAttachmentPaths.Count = 0 Then
+        If Len(Trim$(appConfig.OutlookSenderEmail)) > 0 Then
+            Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments starting with the configured OUTLOOK_ATTACHMENT_PREFIX were found in Outlook messages matching the configured subject phrase and sender: " & appConfig.OutlookSenderEmail)
+        Else
+            Call VBA.Err.Raise(ERROR_OUTLOOK, METHOD_NAME, "No .xlsx or .xls attachments starting with the configured OUTLOOK_ATTACHMENT_PREFIX were found in matching Outlook messages.")
+        End If
+    End If
 
 ExitPoint:
     Set objAttachment = Nothing
@@ -116,7 +134,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;attachmentPrefix;workspace;currentMailSubject", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookAttachmentPrefix, strWorkspace, strCurrentMailSubject)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailbox;sourceFolder;archiveFolder;subjectPrefix;senderEmail;attachmentPrefix;workspace;currentMailSubject;currentSenderEmail", appConfig.OutlookMailbox, appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, appConfig.OutlookSubjectPrefix, appConfig.OutlookSenderEmail, appConfig.OutlookAttachmentPrefix, strWorkspace, strCurrentMailSubject, strCurrentSenderEmail)
     GoTo ExitPoint
 End Function
 
@@ -328,6 +346,67 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    objMail As Object
+' Returns:       String
+' Description:   Resolves the sender to a normal SMTP address for both SMTP and Exchange senders.
+'-------------------------------------------------------------------------------
+Private Function GetSenderSmtpAddress(ByVal objMail As Object) As String
+    Const METHOD_NAME As String = "GetSenderSmtpAddress"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim objAddressEntry As Object
+    Dim objExchangeDistributionList As Object
+    Dim objExchangeUser As Object
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If objMail Is Nothing Then GoTo ExitPoint
+
+    strResult = Trim$(CStr(objMail.SenderEmailAddress))
+
+    If StrComp(Trim$(CStr(objMail.SenderEmailType)), "EX", vbTextCompare) = 0 Then
+        Set objAddressEntry = objMail.Sender
+
+        If Not objAddressEntry Is Nothing Then
+            Set objExchangeUser = objAddressEntry.GetExchangeUser
+
+            If Not objExchangeUser Is Nothing Then
+                If Len(Trim$(CStr(objExchangeUser.PrimarySmtpAddress))) > 0 Then
+                    strResult = Trim$(CStr(objExchangeUser.PrimarySmtpAddress))
+                End If
+            Else
+                Set objExchangeDistributionList = objAddressEntry.GetExchangeDistributionList
+
+                If Not objExchangeDistributionList Is Nothing Then
+                    If Len(Trim$(CStr(objExchangeDistributionList.PrimarySmtpAddress))) > 0 Then
+                        strResult = Trim$(CStr(objExchangeDistributionList.PrimarySmtpAddress))
+                    End If
+                End If
+            End If
+        End If
+    End If
+
+    strResult = LCase$(Trim$(strResult))
+
+ExitPoint:
+    Set objExchangeDistributionList = Nothing
+    Set objExchangeUser = Nothing
+    Set objAddressEntry = Nothing
+    If errNumber = 0 Then GetSenderSmtpAddress = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
 ' Parameters:    strSubject As String; strPhrase As String
 ' Returns:       Boolean
@@ -387,3 +466,4 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
