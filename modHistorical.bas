@@ -188,7 +188,7 @@ Private Sub UpdateHistoricalWorkbook(ByVal strHistoricalPath As String, ByRef ar
 
     If blnNewWorkbook Or lngNewCount > 0 Or blnHeaderUpgraded Then
         lngExistingLastRow = lngExistingLastRow + lngNewCount
-        Call wksHistory.Range(wksHistory.Cells(1, 1), wksHistory.Cells(lngExistingLastRow, OUTPUT_COLUMN_COUNT)).Columns.AutoFit
+        Call AutoFitColumnsWithPadding(wksHistory.Range(wksHistory.Cells(1, 1), wksHistory.Cells(lngExistingLastRow, OUTPUT_COLUMN_COUNT)).Columns, 2)
     End If
 
     If blnNewWorkbook Then
@@ -365,3 +365,46 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "historicalPath;column", strHistoricalPath, lngColumn)
     GoTo ExitPoint
 End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    rngColumns As Excel.Range; dblPadding As Double
+' Returns:       ---
+' Description:   AutoFits historical output columns and adds extra width.
+'-------------------------------------------------------------------------------
+Private Sub AutoFitColumnsWithPadding(ByVal rngColumns As Excel.Range, ByVal dblPadding As Double)
+    Const METHOD_NAME As String = "AutoFitColumnsWithPadding"
+    Const MAX_EXCEL_COLUMN_WIDTH As Double = 255
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim rngColumn As Excel.Range
+    Dim dblNewWidth As Double
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call rngColumns.AutoFit
+
+    For Each rngColumn In rngColumns.Columns
+        dblNewWidth = rngColumn.ColumnWidth + dblPadding
+
+        If dblNewWidth > MAX_EXCEL_COLUMN_WIDTH Then
+            dblNewWidth = MAX_EXCEL_COLUMN_WIDTH
+        End If
+
+        rngColumn.ColumnWidth = dblNewWidth
+    Next rngColumn
+
+ExitPoint:
+    Set rngColumn = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "padding", dblPadding)
+    GoTo ExitPoint
+End Sub
+
