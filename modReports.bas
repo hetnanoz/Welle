@@ -1,6 +1,8 @@
+
 Option Explicit
 
 Private Const CLASS_NAME As String = "modReports"
+Private Const SAVE_EMPTY_DAILY_TEAM_REPORTS As Boolean = False
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -172,11 +174,14 @@ Public Sub CreateDailyReports(ByRef arrCombined As Variant, ByVal colTeams As Co
         arrTeamData = FilterTransactionsByTeam(arrCombined, strTeam)
         blnEmpty = UBound(arrTeamData, 1) = 1
 
-        strFileName = REPORT_TEAM_PREFIX & strTeamFilePart & "_" & strDateToken & "_" & strTimeToken
-        If blnEmpty Then strFileName = strFileName & "_EMPTY"
-        strFileName = strFileName & ".xlsx"
+        If (Not blnEmpty) Or SAVE_EMPTY_DAILY_TEAM_REPORTS Then
+            strFileName = REPORT_TEAM_PREFIX & strTeamFilePart & "_" & strDateToken & "_" & strTimeToken
+            If blnEmpty Then strFileName = strFileName & "_EMPTY"
+            strFileName = strFileName & ".xlsx"
 
-        Call PublishReport(arrTeamData, strFileName, colDestinationRoots, DateValue(dtRunTimestamp), strWorkspace)
+            Call PublishReport(arrTeamData, strFileName, colDestinationRoots, DateValue(dtRunTimestamp), strWorkspace)
+        End If
+
         arrTeamData = Empty
     Next lngTeam
 
@@ -367,7 +372,7 @@ Private Sub FormatTransactionWorksheet(ByVal wksTransactions As Excel.Worksheet,
     wksTransactions.Columns("H:I").NumberFormat = "dd.mm.yyyy"
     wksTransactions.Columns("R:S").NumberFormat = "#,##0.00"
     wksTransactions.Columns("V:V").NumberFormat = OUTPUT_TIMESTAMP_NUMBER_FORMAT
-    Call rngTable.Columns.AutoFit
+    Call AutoFitColumnsWithPadding(rngTable.Columns, 2)
 
 ExitPoint:
     Set rngTable = Nothing
@@ -380,3 +385,46 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "lastRow", lngLastRow)
     GoTo ExitPoint
 End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-02
+' Parameters:    rngColumns As Excel.Range; dblPadding As Double
+' Returns:       ---
+' Description:   AutoFits output columns and adds extra width for readability.
+'-------------------------------------------------------------------------------
+Private Sub AutoFitColumnsWithPadding(ByVal rngColumns As Excel.Range, ByVal dblPadding As Double)
+    Const METHOD_NAME As String = "AutoFitColumnsWithPadding"
+    Const MAX_EXCEL_COLUMN_WIDTH As Double = 255
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim rngColumn As Excel.Range
+    Dim dblNewWidth As Double
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call rngColumns.AutoFit
+
+    For Each rngColumn In rngColumns.Columns
+        dblNewWidth = rngColumn.ColumnWidth + dblPadding
+
+        If dblNewWidth > MAX_EXCEL_COLUMN_WIDTH Then
+            dblNewWidth = MAX_EXCEL_COLUMN_WIDTH
+        End If
+
+        rngColumn.ColumnWidth = dblNewWidth
+    Next rngColumn
+
+ExitPoint:
+    Set rngColumn = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "padding", dblPadding)
+    GoTo ExitPoint
+End Sub
+
