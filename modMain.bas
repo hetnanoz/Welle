@@ -31,6 +31,8 @@ Public Sub RunDallasCashTransactions()
     Dim lngPreviousAutomationSecurity As Long
     Dim strInputFolder As String
     Dim strLatestFondslistePath As String
+    Dim strResolvedLocalOutputFolder As String
+    Dim strResolvedSharePointOutputFolder As String
     Dim strStageWorkspace As String
     Dim strSuccessMessage As String
     Dim varPreviousStatusBar As Variant
@@ -87,6 +89,14 @@ Public Sub RunDallasCashTransactions()
     Set colTeams = ParseSupportedTeams(appConfig.SupportedTeams)
     Set colDestinationRoots = BuildDestinationRoots(appConfig)
 
+    If appConfig.SaveLocal Then
+        strResolvedLocalOutputFolder = BuildDatedFolderPath(ResolveOutputPath(appConfig.OutputLocalBase), DateValue(dtRunTimestamp))
+    End If
+
+    If appConfig.SaveSharePoint Then
+        strResolvedSharePointOutputFolder = BuildDatedFolderPath(ResolveOutputPath(appConfig.OutputSharePointBase), DateValue(dtRunTimestamp))
+    End If
+
     Application.StatusBar = "Dallas Cash Transactions: publishing source input files..."
     Call PublishInputFilesToDailyFolders(colAttachmentPaths, colDestinationRoots, DateValue(dtRunTimestamp), strInputFolder)
 
@@ -107,7 +117,7 @@ Public Sub RunDallasCashTransactions()
     Application.StatusBar = "Dallas Cash Transactions: archiving processed Outlook messages..."
     Call ArchiveProcessedOutlookMessages(appConfig, dictProcessedMailSubjects)
 
-    strSuccessMessage = BuildSuccessMessage(arrCombined, colTeams, colAttachmentPaths.Count, dictProcessedMailSubjects.Count, appConfig.CreateEmailDraft, blnEmailDraftCreated, blnEmailLabelApplied)
+    strSuccessMessage = BuildSuccessMessage(arrCombined, colTeams, colAttachmentPaths.Count, dictProcessedMailSubjects.Count, appConfig.CreateEmailDraft, blnEmailDraftCreated, blnEmailLabelApplied, strResolvedLocalOutputFolder, strResolvedSharePointOutputFolder)
 
 ExitPoint:
     Set dictAccounts = Nothing
@@ -149,11 +159,11 @@ End Sub
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
-' Parameters:    arrCombined As Variant; colTeams As Collection; lngAttachmentCount As Long; lngMailCount As Long; blnEmailRequested As Boolean; blnEmailDraftCreated As Boolean; blnEmailLabelApplied As Boolean
+' Parameters:    arrCombined As Variant; colTeams As Collection; lngAttachmentCount As Long; lngMailCount As Long; blnEmailRequested As Boolean; blnEmailDraftCreated As Boolean; blnEmailLabelApplied As Boolean; strLocalOutputFolder As String; strSharePointOutputFolder As String
 ' Returns:       String
 ' Description:   Builds the final success message with transaction counts per team.
 '-------------------------------------------------------------------------------
-Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal lngAttachmentCount As Long, ByVal lngMailCount As Long, ByVal blnEmailRequested As Boolean, ByVal blnEmailDraftCreated As Boolean, ByVal blnEmailLabelApplied As Boolean) As String
+Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeams As Collection, ByVal lngAttachmentCount As Long, ByVal lngMailCount As Long, ByVal blnEmailRequested As Boolean, ByVal blnEmailDraftCreated As Boolean, ByVal blnEmailLabelApplied As Boolean, ByVal strLocalOutputFolder As String, ByVal strSharePointOutputFolder As String) As String
     Const METHOD_NAME As String = "BuildSuccessMessage"
     Dim arrKeys As Variant
     Dim dictConfigured As Object
@@ -254,6 +264,16 @@ Private Function BuildSuccessMessage(ByRef arrCombined As Variant, ByVal colTeam
         strResult = strResult & "Other / unconfigured Team values: " & strOtherTeams
     End If
 
+    If Len(strLocalOutputFolder) > 0 Then
+        strResult = strResult & vbCrLf & vbCrLf
+        strResult = strResult & "Local output:" & vbCrLf & strLocalOutputFolder
+    End If
+
+    If Len(strSharePointOutputFolder) > 0 Then
+        strResult = strResult & vbCrLf & vbCrLf
+        strResult = strResult & "SharePoint output:" & vbCrLf & strSharePointOutputFolder
+    End If
+
 ExitPoint:
     Set dictTeamCounts = Nothing
     Set dictConfigured = Nothing
@@ -268,4 +288,5 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "row;team", lngRow, strTeam)
     GoTo ExitPoint
 End Function
+
 
