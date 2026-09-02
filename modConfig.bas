@@ -23,6 +23,7 @@ Public Sub LoadConfiguration(ByRef appConfig As TAppConfig)
     appConfig.OutlookSourceFolder = ReadRequiredText(NAME_OUTLOOK_SOURCE_FOLDER)
     appConfig.OutlookArchiveFolder = ReadRequiredText(NAME_OUTLOOK_ARCHIVE_FOLDER)
     appConfig.OutlookSubjectPrefix = ReadRequiredText(NAME_OUTLOOK_SUBJECT_PREFIX)
+    appConfig.OutlookSenderEmail = ReadOptionalText(NAME_OUTLOOK_SENDER_EMAIL)
     appConfig.OutlookAttachmentPrefix = ReadRequiredText(NAME_OUTLOOK_ATTACHMENT_PREFIX)
     appConfig.InputWorksheetName = ReadRequiredText(NAME_INPUT_WORKSHEET_NAME)
     appConfig.FondslisteFolder = ReadRequiredText(NAME_FONDSLISTE_FOLDER)
@@ -370,3 +371,4 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
