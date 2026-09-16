@@ -1,6 +1,1 @@
-1. Input files / location
-Excel Cash Transactions reports are received as attachments in the shared Outlook mailbox. The tool also uses the current Fondsliste and internal Static Data for fund, master fund and team mapping.
-2. Main business benefit
-The main benefit is operational risk reduction rather than time saving. The tool improves completeness and accuracy, reducing the risk of missing trades, manual processing errors and incorrect assignments.
-3. Tool functionality
-The tool automatically downloads and filters relevant attachments, combines and validates the data, enriches transactions with reference data, identifies unknown items, creates team and historical reports, saves outputs to SharePoint and prepares the Outlook draft.
+If the tool is unavailable, the process can be performed manually. The relevant Cash Transactions Excel attachments must be downloaded from the shared Outlook mailbox and consolidated into one file. Transactions should then be checked and mapped to the correct fund, master fund and team using the current Fondsliste and the internal mapping data. Unknown or unmapped transactions must be reviewed separately and duplicates checked. The final data should be split by the relevant teams, saved to the designated SharePoint location and the responsible teams informed by email. Source emails should be archived after successful processing.
