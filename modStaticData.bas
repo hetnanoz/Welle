@@ -44,7 +44,7 @@ Public Sub UpdateStaticDataFromFondsliste(ByVal dictFundTeams As Object)
         End If
     Next lngRow
 
-    wksStatic.Range(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW, 5), wksStatic.Cells(lngLastRow, 5)).Value2 = arrTeams
+    wksStatic.Range(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW, 7), wksStatic.Cells(lngLastRow, 7)).Value2 = arrTeams
 
 ExitPoint:
     Set wksStatic = Nothing
@@ -88,7 +88,7 @@ Public Function BuildAccountMappingDictionary() As Object
 
     If lngLastRow < STATIC_DATA_FIRST_DATA_ROW Then Call VBA.Err.Raise(ERROR_STATIC_DATA, METHOD_NAME, "Static_Data does not contain any account mappings.")
 
-    arrData = wksStatic.Range(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW, 2), wksStatic.Cells(lngLastRow, 5)).Value2
+    arrData = wksStatic.Range(wksStatic.Cells(STATIC_DATA_FIRST_DATA_ROW, 2), wksStatic.Cells(lngLastRow, 7)).Value2
     Set dictAccounts = CreateObject("Scripting.Dictionary")
     dictAccounts.CompareMode = vbTextCompare
 
@@ -109,7 +109,7 @@ Public Function BuildAccountMappingDictionary() As Object
         If Len(strIdentifier) > 0 Then
             strFund = GetTextValue(arrData(lngRow, 2))
             strMaster = GetTextValue(arrData(lngRow, 3))
-            strTeam = GetTextValue(arrData(lngRow, 4))
+            strTeam = GetTextValue(arrData(lngRow, 6))
             dictAccounts(strIdentifier) = Array(strFund, strMaster, strTeam)
         End If
     Next lngRow
@@ -195,7 +195,7 @@ End Sub
 ' Creation date: 2026-08-26
 ' Parameters:    wksStatic As Excel.Worksheet
 ' Returns:       Long
-' Description:   Finds the last populated Static_Data row across columns B:E.
+' Description:   Finds the last populated Static_Data row across columns B:G.
 '-------------------------------------------------------------------------------
 Private Function GetStaticDataLastRow(ByVal wksStatic As Excel.Worksheet) As Long
     Const METHOD_NAME As String = "GetStaticDataLastRow"
@@ -207,7 +207,7 @@ Private Function GetStaticDataLastRow(ByVal wksStatic As Excel.Worksheet) As Lon
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    For lngColumn = 2 To 5
+    For lngColumn = 2 To 7
         lngColumnLastRow = wksStatic.Cells(wksStatic.Rows.Count, lngColumn).End(xlUp).Row
         If lngColumnLastRow > lngResult Then lngResult = lngColumnLastRow
     Next lngColumn
@@ -293,4 +293,5 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
 
