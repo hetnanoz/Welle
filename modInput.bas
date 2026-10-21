@@ -137,14 +137,9 @@ Private Sub ReadInputFileData(ByVal strFilePath As String, ByVal strWorksheetNam
     If wkbInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook could not be opened or reused: '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
     If wkbInput.Worksheets.Count = 0 Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook does not contain a worksheet. Outlook mail subject: '" & strMailSubject & "'.")
 
-    For Each wksCandidate In wkbInput.Worksheets
-        If StrComp(CStr(wksCandidate.Name), strWorksheetName, vbTextCompare) = 0 Then
-            Set wksInput = wksCandidate
-            Exit For
-        End If
-    Next wksCandidate
+    Set wksInput = GetConfiguredInputWorksheet(wkbInput, strWorksheetName)
 
-    If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Worksheet '" & strWorksheetName & "' was not found in input file '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
+    If wksInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "None of the configured worksheets '" & strWorksheetName & "' was found in input file '" & strFilePath & "'. Outlook mail subject: '" & strMailSubject & "'.")
 
     lngLastColumn = GetInputLastHeaderColumn(wksInput)
     lngLastRow = GetInputLastRow(wksInput, lngLastColumn)
@@ -731,6 +726,56 @@ End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    wkbInput As Excel.Workbook; strWorksheetOptions As String
+' Returns:       Excel.Worksheet
+' Description:   Returns the first matching worksheet using semicolon-separated configured names in left-to-right priority order.
+'-------------------------------------------------------------------------------
+Private Function GetConfiguredInputWorksheet(ByVal wkbInput As Excel.Workbook, ByVal strWorksheetOptions As String) As Excel.Worksheet
+    Const METHOD_NAME As String = "GetConfiguredInputWorksheet"
+    Dim arrOptions As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngOption As Long
+    Dim strOption As String
+    Dim wksCandidate As Excel.Worksheet
+    Dim wksResult As Excel.Worksheet
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If wkbInput Is Nothing Then Call VBA.Err.Raise(ERROR_INPUT_DATA, METHOD_NAME, "Input workbook is not available.")
+
+    arrOptions = Split(strWorksheetOptions, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        strOption = Trim$(CStr(arrOptions(lngOption)))
+
+        If Len(strOption) > 0 Then
+            For Each wksCandidate In wkbInput.Worksheets
+                If StrComp(CStr(wksCandidate.Name), strOption, vbTextCompare) = 0 Then
+                    Set wksResult = wksCandidate
+                    GoTo ExitPoint
+                End If
+            Next wksCandidate
+        End If
+    Next lngOption
+
+ExitPoint:
+    Set wksCandidate = Nothing
+    If errNumber = 0 Then Set GetConfiguredInputWorksheet = wksResult
+    Set wksResult = Nothing
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "worksheetOptions", strWorksheetOptions)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
 ' Creation date: 2026-08-27
 ' Parameters:    wksInput As Excel.Worksheet
 ' Returns:       Long
@@ -820,3 +865,4 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
