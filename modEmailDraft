@@ -20,6 +20,7 @@ Public Sub CreateCashTransactionsEmailDraft(ByRef appConfig As TAppConfig, ByRef
     Dim objMail As Object
     Dim strBodyHtml As String
     Dim strLocalFolder As String
+    Dim strSharePointFolder As String
     Dim strSharePointUrl As String
     Dim strSignatureHtml As String
     Dim strSubject As String
@@ -31,7 +32,12 @@ Public Sub CreateCashTransactionsEmailDraft(ByRef appConfig As TAppConfig, ByRef
     strSubject = BuildEmailSubject(appConfig.MailSubject, dtRunTimestamp, strTeamList)
     strLocalFolder = GetEmailLocalFolder(appConfig, dtRunTimestamp)
     strSharePointUrl = GetEmailSharePointUrl(appConfig)
-    strBodyHtml = BuildEmailBodyHtml(appConfig, arrCombined, dtRunTimestamp, strTeamList, strLocalFolder, strSharePointUrl)
+
+    If appConfig.SaveSharePoint And Len(Trim$(strSharePointUrl)) = 0 Then
+        strSharePointFolder = GetEmailSharePointFolder(appConfig, dtRunTimestamp)
+    End If
+
+    strBodyHtml = BuildEmailBodyHtml(appConfig, arrCombined, dtRunTimestamp, strTeamList, strLocalFolder, strSharePointUrl, strSharePointFolder)
 
     Set objOutlook = CreateObject("Outlook.Application")
     Set objMail = objOutlook.CreateItem(0)
@@ -157,16 +163,15 @@ End Function
 ' Returns:       String
 ' Description:   Builds an HTML email body from configured text and supported dynamic tokens.
 '-------------------------------------------------------------------------------
-Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrCombined As Variant, ByVal dtRunTimestamp As Date, ByVal strTeamList As String, ByVal strLocalFolder As String, ByVal strSharePointUrl As String) As String
+Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrCombined As Variant, ByVal dtRunTimestamp As Date, ByVal strTeamList As String, ByVal strLocalFolder As String, ByVal strSharePointUrl As String, ByVal strSharePointFolder As String) As String
     Const METHOD_NAME As String = "BuildEmailBodyHtml"
-    Const SHAREPOINT_PLACEHOLDER As String = "[[SHAREPOINT_LINK_TOKEN]]"
+    Const OUTPUT_LOCATIONS_PLACEHOLDER As String = "[[OUTPUT_LOCATIONS_TOKEN]]"
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngTransactionCount As Long
     Dim lngUnknownCount As Long
-    Dim strEncodedSharePoint As String
+    Dim strOutputLocationsHtml As String
     Dim strResult As String
-    Dim strSharePointHtml As String
     Dim strTeamsToken As String
     Dim strTemplate As String
     Dim strUnknownStatus As String
@@ -187,6 +192,15 @@ Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrComb
         If Len(strTemplate) = 0 Then strTemplate = GetDefaultMailBody(False)
     End If
 
+    ' Backward compatibility with the previous Mapping templates.
+    strTemplate = Replace$(strTemplate, "Files are available on SharePoint:", "Files are available in the following location(s):", 1, -1, vbTextCompare)
+    strTemplate = Replace$(strTemplate, "SharePoint: [SHAREPOINT_URL]", "[OUTPUT_LOCATIONS]", 1, -1, vbTextCompare)
+    strTemplate = Replace$(strTemplate, "[SHAREPOINT_URL]", "[OUTPUT_LOCATIONS]", 1, -1, vbTextCompare)
+
+    If InStr(1, strTemplate, "[OUTPUT_LOCATIONS]", vbTextCompare) = 0 Then
+        strTemplate = strTemplate & vbCrLf & vbCrLf & "Files are available in the following location(s):" & vbCrLf & "[OUTPUT_LOCATIONS]"
+    End If
+
     strTemplate = Replace$(strTemplate, "[RUN_DATE]", Format$(dtRunTimestamp, "dd/mm/yyyy"))
     strTemplate = Replace$(strTemplate, "[CHECK_DATE]", Format$(dtRunTimestamp, "dd/mm/yyyy"))
     strTemplate = Replace$(strTemplate, "[TEAMS]", strTeamsToken)
@@ -195,25 +209,14 @@ Private Function BuildEmailBodyHtml(ByRef appConfig As TAppConfig, ByRef arrComb
     strTemplate = Replace$(strTemplate, "[UNKNOWN_COUNT]", CStr(lngUnknownCount))
     strTemplate = Replace$(strTemplate, "[UNKNOWN_MASTER_FILE]", HISTORICAL_UNKNOWN_FILE)
     strTemplate = Replace$(strTemplate, "[UNKNOWN_STATUS]", strUnknownStatus)
-
-    If InStr(1, strTemplate, "[SHAREPOINT_URL]", vbTextCompare) = 0 Then
-        strTemplate = strTemplate & vbCrLf & vbCrLf & "SharePoint: [SHAREPOINT_URL]"
-    End If
-
-    strTemplate = Replace$(strTemplate, "[SHAREPOINT_URL]", SHAREPOINT_PLACEHOLDER)
+    strTemplate = Replace$(strTemplate, "[OUTPUT_LOCATIONS]", OUTPUT_LOCATIONS_PLACEHOLDER, 1, -1, vbTextCompare)
 
     strResult = HtmlEncode(strTemplate)
     strResult = Replace$(strResult, vbCrLf, "<br>")
     strResult = Replace$(strResult, vbLf, "<br>")
 
-    If Len(strSharePointUrl) > 0 Then
-        strEncodedSharePoint = HtmlEncode(strSharePointUrl)
-        strSharePointHtml = "<a href='" & strEncodedSharePoint & "'>" & strEncodedSharePoint & "</a>"
-    Else
-        strSharePointHtml = "not configured"
-    End If
-
-    strResult = Replace$(strResult, HtmlEncode(SHAREPOINT_PLACEHOLDER), strSharePointHtml)
+    strOutputLocationsHtml = BuildOutputLocationsHtml(appConfig, strLocalFolder, strSharePointUrl, strSharePointFolder)
+    strResult = Replace$(strResult, HtmlEncode(OUTPUT_LOCATIONS_PLACEHOLDER), strOutputLocationsHtml)
 
 ExitPoint:
     If errNumber = 0 Then BuildEmailBodyHtml = strResult
@@ -223,7 +226,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "teamList;localFolder;sharePointUrl", strTeamList, strLocalFolder, strSharePointUrl)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "teamList;localFolder;sharePointUrl;sharePointFolder", strTeamList, strLocalFolder, strSharePointUrl, strSharePointFolder)
     GoTo ExitPoint
 End Function
 
@@ -253,8 +256,8 @@ Private Function GetDefaultMailBody(ByVal blnHasTeams As Boolean) As String
     End If
 
     strResult = strResult & "[UNKNOWN_STATUS]" & vbCrLf & vbCrLf
-    strResult = strResult & "Files are available on SharePoint:" & vbCrLf
-    strResult = strResult & "[SHAREPOINT_URL]"
+    strResult = strResult & "Files are available in the following location(s):" & vbCrLf
+    strResult = strResult & "[OUTPUT_LOCATIONS]"
 
 ExitPoint:
     If errNumber = 0 Then GetDefaultMailBody = strResult
@@ -324,8 +327,6 @@ Private Function GetEmailLocalFolder(ByRef appConfig As TAppConfig, ByVal dtRunT
     If appConfig.SaveLocal Then
         strLocalRoot = ResolveConfiguredPath(appConfig.OutputLocalBase)
         strResult = BuildDatedFolderPath(strLocalRoot, DateValue(dtRunTimestamp))
-    Else
-        strResult = "not enabled"
     End If
 
 ExitPoint:
@@ -355,12 +356,12 @@ Private Function GetEmailSharePointUrl(ByRef appConfig As TAppConfig) As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    If Not appConfig.SaveSharePoint Then GoTo ExitPoint
+
     strResult = Trim$(appConfig.MailSharePointUrl)
 
     If Len(strResult) = 0 Then
-        If appConfig.SaveSharePoint Then
-            If IsHttpPath(appConfig.OutputSharePointBase) Then strResult = Trim$(appConfig.OutputSharePointBase)
-        End If
+        If IsHttpPath(appConfig.OutputSharePointBase) Then strResult = Trim$(appConfig.OutputSharePointBase)
     End If
 
 ExitPoint:
@@ -371,7 +372,83 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "mailSharePointUrl;outputSharePointBase", appConfig.MailSharePointUrl, appConfig.OutputSharePointBase)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "saveSharePoint;mailSharePointUrl;outputSharePointBase", appConfig.SaveSharePoint, appConfig.MailSharePointUrl, appConfig.OutputSharePointBase)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    appConfig As TAppConfig; dtRunTimestamp As Date
+' Returns:       String
+' Description:   Returns the resolved daily SharePoint sync folder as fallback text when no browser URL is configured.
+'-------------------------------------------------------------------------------
+Private Function GetEmailSharePointFolder(ByRef appConfig As TAppConfig, ByVal dtRunTimestamp As Date) As String
+    Const METHOD_NAME As String = "GetEmailSharePointFolder"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strSharePointRoot As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If appConfig.SaveSharePoint Then
+        strSharePointRoot = ResolveOutputPath(appConfig.OutputSharePointBase)
+        strResult = BuildDatedFolderPath(strSharePointRoot, DateValue(dtRunTimestamp))
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then GetEmailSharePointFolder = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "saveSharePoint;outputSharePointBase", appConfig.SaveSharePoint, appConfig.OutputSharePointBase)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    appConfig As TAppConfig; strLocalFolder As String; strSharePointUrl As String; strSharePointFolder As String
+' Returns:       String
+' Description:   Builds the dynamic HTML list of enabled output locations for the email.
+'-------------------------------------------------------------------------------
+Private Function BuildOutputLocationsHtml(ByRef appConfig As TAppConfig, ByVal strLocalFolder As String, ByVal strSharePointUrl As String, ByVal strSharePointFolder As String) As String
+    Const METHOD_NAME As String = "BuildOutputLocationsHtml"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strEncodedSharePoint As String
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If appConfig.SaveLocal Then
+        strResult = "Local folder: " & HtmlEncode(strLocalFolder)
+    End If
+
+    If appConfig.SaveSharePoint Then
+        If Len(strResult) > 0 Then strResult = strResult & "<br>"
+
+        If Len(Trim$(strSharePointUrl)) > 0 Then
+            strEncodedSharePoint = HtmlEncode(strSharePointUrl)
+            strResult = strResult & "SharePoint: <a href='" & strEncodedSharePoint & "'>" & strEncodedSharePoint & "</a>"
+        Else
+            strResult = strResult & "SharePoint folder: " & HtmlEncode(strSharePointFolder)
+        End If
+    End If
+
+ExitPoint:
+    If errNumber = 0 Then BuildOutputLocationsHtml = strResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "saveLocal;saveSharePoint;localFolder;sharePointUrl;sharePointFolder", appConfig.SaveLocal, appConfig.SaveSharePoint, strLocalFolder, strSharePointUrl, strSharePointFolder)
     GoTo ExitPoint
 End Function
 
@@ -443,3 +520,4 @@ ErrHandler:
     blnResult = False
     GoTo ExitPoint
 End Function
+
