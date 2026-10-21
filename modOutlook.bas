@@ -69,7 +69,7 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
 
                 If Len(Trim$(appConfig.OutlookSenderEmail)) > 0 Then
                     strCurrentSenderEmail = GetSenderSmtpAddress(objMail)
-                    blnSenderMatches = StrComp(Trim$(strCurrentSenderEmail), Trim$(appConfig.OutlookSenderEmail), vbTextCompare) = 0
+                    blnSenderMatches = ValueMatchesAnyExactOption(strCurrentSenderEmail, appConfig.OutlookSenderEmail)
                 End If
 
                 If blnSenderMatches Then
@@ -80,16 +80,14 @@ Public Function DownloadCashTransactionAttachments(ByRef appConfig As TAppConfig
                         strAttachmentFileName = CStr(objAttachment.FileName)
                         strExtension = GetFileExtension(strAttachmentFileName)
 
-                        If Len(strAttachmentFileName) >= Len(appConfig.OutlookAttachmentPrefix) Then
-                            If StrComp(Left$(strAttachmentFileName, Len(appConfig.OutlookAttachmentPrefix)), appConfig.OutlookAttachmentPrefix, vbTextCompare) = 0 Then
-                                If strExtension = ".xlsx" Or strExtension = ".xls" Then
-                                    strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(strAttachmentFileName)
-                                    strTargetPath = CombinePath(strWorkspace, strSafeFileName)
-                                    Call objAttachment.SaveAsFile(strTargetPath)
-                                    colAttachmentPaths.Add strTargetPath
-                                    dictAttachmentSubjects(strTargetPath) = strCurrentMailSubject
-                                    lngSavedForMail = lngSavedForMail + 1
-                                End If
+                        If ValueStartsWithAnyOption(strAttachmentFileName, appConfig.OutlookAttachmentPrefix) Then
+                            If strExtension = ".xlsx" Or strExtension = ".xls" Then
+                                strSafeFileName = Format$(CDate(objMail.ReceivedTime), "yyyymmdd_hhnnss") & "_" & Format$(lngItem, "0000") & "_" & Format$(lngAttachment, "00") & "_" & SanitizeFileNamePart(strAttachmentFileName)
+                                strTargetPath = CombinePath(strWorkspace, strSafeFileName)
+                                Call objAttachment.SaveAsFile(strTargetPath)
+                                colAttachmentPaths.Add strTargetPath
+                                dictAttachmentSubjects(strTargetPath) = strCurrentMailSubject
+                                lngSavedForMail = lngSavedForMail + 1
                             End If
                         End If
 
@@ -420,9 +418,7 @@ Private Function SubjectContainsConfiguredPhrase(ByVal strSubject As String, ByV
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    If Len(Trim$(strPhrase)) > 0 Then
-        blnResult = InStr(1, strSubject, strPhrase, vbTextCompare) > 0
-    End If
+    blnResult = ValueContainsAnyOption(strSubject, strPhrase)
 
 ExitPoint:
     If errNumber = 0 Then SubjectContainsConfiguredPhrase = blnResult
@@ -445,15 +441,34 @@ End Function
 '-------------------------------------------------------------------------------
 Private Function BuildSubjectFilter(ByVal strSubjectPhrase As String) As String
     Const METHOD_NAME As String = "BuildSubjectFilter"
+    Dim arrOptions As Variant
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngOption As Long
+    Dim strClause As String
     Dim strEscapedPhrase As String
+    Dim strOption As String
     Dim strResult As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    strEscapedPhrase = Replace$(strSubjectPhrase, "'", "''")
-    strResult = "@SQL=" & Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '%" & strEscapedPhrase & "%'"
+    arrOptions = Split(strSubjectPhrase, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        strOption = Trim$(CStr(arrOptions(lngOption)))
+
+        If Len(strOption) > 0 Then
+            strEscapedPhrase = Replace$(strOption, "'", "''")
+            strClause = Chr$(34) & "urn:schemas:httpmail:subject" & Chr$(34) & " LIKE '%" & strEscapedPhrase & "%'"
+
+            If Len(strResult) > 0 Then strResult = strResult & " OR "
+            strResult = strResult & strClause
+        End If
+    Next lngOption
+
+    If Len(strResult) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX does not contain a usable option.")
+
+    strResult = "@SQL=(" & strResult & ")"
 
 ExitPoint:
     If errNumber = 0 Then BuildSubjectFilter = strResult
@@ -463,7 +478,139 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "subjectOptions", strSubjectPhrase)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    strValue As String; strOptions As String
+' Returns:       Boolean
+' Description:   Returns True when a value exactly matches any semicolon-separated option.
+'-------------------------------------------------------------------------------
+Private Function ValueMatchesAnyExactOption(ByVal strValue As String, ByVal strOptions As String) As Boolean
+    Const METHOD_NAME As String = "ValueMatchesAnyExactOption"
+    Dim arrOptions As Variant
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngOption As Long
+    Dim strOption As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrOptions = Split(strOptions, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        strOption = Trim$(CStr(arrOptions(lngOption)))
+
+        If Len(strOption) > 0 Then
+            If StrComp(Trim$(strValue), strOption, vbTextCompare) = 0 Then
+                blnResult = True
+                Exit For
+            End If
+        End If
+    Next lngOption
+
+ExitPoint:
+    If errNumber = 0 Then ValueMatchesAnyExactOption = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "value;options", strValue, strOptions)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    strValue As String; strOptions As String
+' Returns:       Boolean
+' Description:   Returns True when a value starts with any semicolon-separated option.
+'-------------------------------------------------------------------------------
+Private Function ValueStartsWithAnyOption(ByVal strValue As String, ByVal strOptions As String) As Boolean
+    Const METHOD_NAME As String = "ValueStartsWithAnyOption"
+    Dim arrOptions As Variant
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngOption As Long
+    Dim strOption As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrOptions = Split(strOptions, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        strOption = Trim$(CStr(arrOptions(lngOption)))
+
+        If Len(strOption) > 0 Then
+            If Len(strValue) >= Len(strOption) Then
+                If StrComp(Left$(strValue, Len(strOption)), strOption, vbTextCompare) = 0 Then
+                    blnResult = True
+                    Exit For
+                End If
+            End If
+        End If
+    Next lngOption
+
+ExitPoint:
+    If errNumber = 0 Then ValueStartsWithAnyOption = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "value;options", strValue, strOptions)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    strValue As String; strOptions As String
+' Returns:       Boolean
+' Description:   Returns True when a value contains any semicolon-separated option.
+'-------------------------------------------------------------------------------
+Private Function ValueContainsAnyOption(ByVal strValue As String, ByVal strOptions As String) As Boolean
+    Const METHOD_NAME As String = "ValueContainsAnyOption"
+    Dim arrOptions As Variant
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngOption As Long
+    Dim strOption As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrOptions = Split(strOptions, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        strOption = Trim$(CStr(arrOptions(lngOption)))
+
+        If Len(strOption) > 0 Then
+            If InStr(1, strValue, strOption, vbTextCompare) > 0 Then
+                blnResult = True
+                Exit For
+            End If
+        End If
+    Next lngOption
+
+ExitPoint:
+    If errNumber = 0 Then ValueContainsAnyOption = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "value;options", strValue, strOptions)
+    GoTo ExitPoint
+End Function
+
 
