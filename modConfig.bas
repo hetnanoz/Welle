@@ -349,11 +349,18 @@ Private Sub ValidateConfiguration(ByRef appConfig As TAppConfig)
     If Not appConfig.SaveLocal And Not appConfig.SaveSharePoint Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "At least one output flag must be TRUE.")
     If appConfig.SaveLocal And Len(Trim$(appConfig.OutputLocalBase)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "Local output path is required when FLAG_SAVE_LOCAL is TRUE.")
     If appConfig.SaveSharePoint And Len(Trim$(appConfig.OutputSharePointBase)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "SharePoint output path is required when FLAG_SAVE_SHAREPOINT is TRUE.")
-    If Len(Trim$(appConfig.OutlookSubjectPrefix)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must not be blank.")
-    If InStr(1, appConfig.OutlookSubjectPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must not contain '*'. Enter only the beginning of the subject.")
-    If Len(Trim$(appConfig.OutlookAttachmentPrefix)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must not be blank.")
-    If InStr(1, appConfig.OutlookAttachmentPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must not contain '*'. Enter only the beginning of the attachment filename.")
-    If Len(Trim$(appConfig.InputWorksheetName)) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "INPUT_WORKSHEET_NAME must not be blank.")
+
+    If Not HasNonBlankSemicolonOption(appConfig.OutlookSubjectPrefix) Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must contain at least one value. Multiple alternatives may be separated with ';'.")
+    If InStr(1, appConfig.OutlookSubjectPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SUBJECT_PREFIX must not contain '*'. Enter one or more subject phrases separated with ';'.")
+
+    If Len(Trim$(appConfig.OutlookSenderEmail)) > 0 Then
+        If Not HasNonBlankSemicolonOption(appConfig.OutlookSenderEmail) Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_SENDER_EMAIL must contain at least one email address or be blank. Multiple alternatives may be separated with ';'.")
+    End If
+
+    If Not HasNonBlankSemicolonOption(appConfig.OutlookAttachmentPrefix) Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must contain at least one value. Multiple alternatives may be separated with ';'.")
+    If InStr(1, appConfig.OutlookAttachmentPrefix, "*", vbBinaryCompare) > 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "OUTLOOK_ATTACHMENT_PREFIX must not contain '*'. Enter one or more attachment filename prefixes separated with ';'.")
+
+    If Not HasNonBlankSemicolonOption(appConfig.InputWorksheetName) Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "INPUT_WORKSHEET_NAME must contain at least one worksheet name. Multiple alternatives may be separated with ';'.")
     If StrComp(appConfig.OutlookSourceFolder, appConfig.OutlookArchiveFolder, vbTextCompare) = 0 Then Call VBA.Err.Raise(ERROR_CONFIGURATION, METHOD_NAME, "Outlook source and archive folders must be different.")
 
     If appConfig.CreateEmailDraft Then
@@ -371,4 +378,43 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-20
+' Parameters:    strOptions As String
+' Returns:       Boolean
+' Description:   Confirms that a semicolon-separated Mapping value contains at least one non-blank option.
+'-------------------------------------------------------------------------------
+Private Function HasNonBlankSemicolonOption(ByVal strOptions As String) As Boolean
+    Const METHOD_NAME As String = "HasNonBlankSemicolonOption"
+    Dim arrOptions As Variant
+    Dim blnResult As Boolean
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngOption As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrOptions = Split(strOptions, ";")
+
+    For lngOption = LBound(arrOptions) To UBound(arrOptions)
+        If Len(Trim$(CStr(arrOptions(lngOption)))) > 0 Then
+            blnResult = True
+            Exit For
+        End If
+    Next lngOption
+
+ExitPoint:
+    If errNumber = 0 Then HasNonBlankSemicolonOption = blnResult
+    If errNumber <> 0 Then Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, "options", strOptions)
+    GoTo ExitPoint
+End Function
+
 
